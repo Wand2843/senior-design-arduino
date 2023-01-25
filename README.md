@@ -2,6 +2,8 @@
 
 This is the main repository for all of the code which applies to our project.
 
+
+
 Here is an introduction on how to clone this repository and update/pull the changes respectively:
 
 Cloning an existing Git repository allows you to copy all the files and history of a project from a remote location (such as GitHub) to your local machine. Here are the basic steps to clone a repository:

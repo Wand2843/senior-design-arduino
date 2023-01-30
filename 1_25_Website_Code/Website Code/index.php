@@ -24,6 +24,42 @@ $sensorName = "Test Sensor";
 
 <script src="https://cdn.tailwindcss.com"></script>
 
+<div class="blob"></div>
+
+<style>
+
+.blob {
+	background: rgba(0, 112, 0, 1);
+	border-radius: 50%;
+	margin: 10px;
+	height: 20px;
+	width: 20px;
+
+	box-shadow: 0 0 0 0 rgba(0, 112, 0, 1);
+	transform: scale(1);
+	animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+	0% {
+		transform: scale(0.95);
+		box-shadow: 0 0 0 0 rgba(0, 112, 0, 0.7);
+	}
+
+	70% {
+		transform: scale(1);
+		box-shadow: 0 0 0 10px rgba(0, 112, 0, 0);
+	}
+
+	100% {
+		transform: scale(0.95);
+		box-shadow: 0 0 0 0 rgba(0, 112, 0, 0);
+	}
+}
+
+
+</style>
+
 <div class="px-5">
   <img class="inline" src="https://i.ibb.co/2N34n9F/ece-Senior-Copy-2.png" alt="Girl in a jacket" width="200" height="300">
   <h3 class="text-lg font-medium leading-6 text-gray-900 inline">ECE 2023 Senior Design</h3>

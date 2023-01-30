@@ -4,8 +4,7 @@
 <aside class="ml-[-100%] fixed z-10 top-0 pb-3 px-6 w-full flex flex-col justify-between h-screen border-r bg-white transition duration-300 md:w-4/12 lg:ml-0 lg:w-[25%] xl:w-[20%] 2xl:w-[15%]">
     <div>
         <div class="-mx-6 px-6 py-1">
-            <a href="#" title="home">
-            </a>
+            <a href="#" title="home"></a>
         </div>
 
         <div class="text-center">
@@ -14,11 +13,8 @@
 			<div class="blob"></div>
 			<span class="pulsate-text">System Online</span>
 			</div>
-			<style>
+<style>
 			
-
-
-
 .pulsate-text {
 	color: rgba(0, 112, 0, 1);
 }
@@ -52,15 +48,15 @@
 	}
 }
 
-
 </style>
+
             <h5 class="hidden mt-4 text-xl font-semibold text-gray-600 lg:block">William Anderson</h5>
             <span class="hidden text-gray-400 lg:block">Admin</span>
         </div>
 
         <ul class="space-y-2 tracking-wide mt-8">
             <li>
-                <a href="#" aria-label="dashboard" class="px-4 py-3 flex items-center space-x-4 rounded-md text-gray-600 group">
+                <a href="/dashboard.php" aria-label="dashboard" class="px-4 py-3 flex items-center space-x-4 rounded-md text-gray-600 group">
                     <svg class="-ml-1 h-6 w-6" viewBox="0 0 24 24" fill="none">
                         <path d="M6 8a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8ZM6 15a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-1Z" class="fill-current text-cyan-400 dark:fill-slate-600"></path>
                         <path d="M13 8a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2V8Z" class="fill-current text-cyan-200 group-hover:text-cyan-300"></path>
@@ -107,15 +103,7 @@
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 my-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
-            </button>
-            <div class="flex space-x-4">
-                <!--search bar -->
-            
-                <!--/search bar -->
-              
-          
-
-            </div>
+        </button>
         </div>
     </div>
 

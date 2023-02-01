@@ -106,6 +106,56 @@
         </button>
         </div>
     </div>
+ 
+
+
+<!-- component -->
+<!-- entire page -->
+<main class="flex justify-center pt-12">
+  <!-- tabs -->
+  <div
+    class="grid w-[40rem] grid-cols-3 space-x-2 rounded-xl bg-gray-200 p-2"
+    x-data="app"
+  >
+    <div>
+      <input type="radio" name="option" id="1" class="peer hidden" checked />
+      <label
+        for="1"
+        class="block cursor-pointer select-none rounded-xl p-2 text-center peer-checked:bg-blue-500 peer-checked:font-bold peer-checked:text-white peer-checked:bg-gradient-to-r from-sky-600 to-cyan-400"
+        >Manual Control</label
+      >
+    </div>
+
+    <div>
+      <input type="radio" name="option" id="2" class="peer hidden" />
+      <label
+        for="2"
+        class="block cursor-pointer select-none rounded-xl p-2 text-center peer-checked:bg-blue-500 peer-checked:font-bold peer-checked:text-white peer-checked:bg-gradient-to-r from-sky-600 to-cyan-400""
+        >Schedule Control</label
+      >
+    </div>
+
+    <div>
+      <input type="radio" name="option" id="3" class="peer hidden" />
+      <label
+        for="3"
+        class="block cursor-pointer select-none rounded-xl p-2 text-center peer-checked:bg-blue-500 peer-checked:font-bold peer-checked:text-white peer-checked:bg-gradient-to-r from-sky-600 to-cyan-400"
+        >Automatic Control</label
+      >
+    </div>
+  </div>
+</main>
+
+
+
+<div class="flex space-x-2 justify-center pt-10">
+  <button
+    type="button"
+    data-mdb-ripple="true"
+    data-mdb-ripple-color="light"
+    class="inline-block px-6 py-2.5 bg-blue-600 text-white font-medium text-xs leading-tight uppercase rounded shadow-md hover:bg-blue-700 hover:shadow-lg focus:bg-blue-700 focus:shadow-lg focus:outline-none focus:ring-0 active:bg-blue-800 active:shadow-lg transition duration-150 ease-in-out"
+  >Submit</button>
+</div>
 
 </div>
 </div>

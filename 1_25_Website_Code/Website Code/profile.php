@@ -15,9 +15,6 @@
 			<span class="pulsate-text">System Online</span>
 			</div>
 			<style>
-			
-
-
 
 .pulsate-text {
 	color: rgba(0, 112, 0, 1);

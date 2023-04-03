@@ -10,11 +10,11 @@
 // Connect SCLK to UNO Digital #13 (Hardware SPI clock)
 // Connect MISO to UNO Digital #12 (Hardware SPI MISO)
 // Connect MOSI to UNO Digital #11 (Hardware SPI MOSI)
-#define RA8875_INT 3
+#define RA8875_INT 8
 #define RA8875_CS 10
 #define RA8875_RESET 9
 
-#define MOTORLEFT 8
+#define MOTORLEFT 3
 #define MOTORRIGHT 7
 #define LAUP 4
 #define LADOWN 5
@@ -172,8 +172,8 @@ void loop() {
 
   /* Calcuate the real X/Y position based on the calibration matrix */
   calibrateTSPoint(&calibrated, &raw, &_tsMatrix);
-  if (pressedOut)
-    tft.fillCircle(calibrated.x, calibrated.y, 3, RA8875_RED);
+  // if (pressedOut)
+    // tft.fillCircle(calibrated.x, calibrated.y, 3, RA8875_RED);
 
   switch (state) {
     case SELF_CHECK:

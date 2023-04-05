@@ -6,6 +6,11 @@
 #include <EEPROM.h>
 #endif
 #include "debouncer.h"
+
+#include <Wire.h>
+#include <TimeLib.h>
+#include <DS1307RTC.h>
+
 // Library only supports hardware SPI at this time
 // Connect SCLK to UNO Digital #13 (Hardware SPI clock)
 // Connect MISO to UNO Digital #12 (Hardware SPI MISO)
@@ -27,6 +32,8 @@ uint16_t tx, ty;
 tsPoint_t _tsLCDPoints[3];
 tsPoint_t _tsTSPoints[3];
 tsMatrix_t _tsMatrix;
+
+tmElements_t tm;
 
 bool WIFISTAT;
 bool MANUALMODE;
@@ -79,8 +86,8 @@ int endTickTime;
 int motorStartTime;
 
 void setup() {
-  motorCount=0;
-  laCount=0;
+  motorCount = 0;
+  laCount = 0;
   WIFISTAT = true;
   MANUALMODE = true;
   PHOTOTRACKING = false;
@@ -122,7 +129,7 @@ void setup() {
   pinMode(RA8875_INT, INPUT);
   digitalWrite(RA8875_INT, HIGH);
   tft.touchEnable(true);
-  
+
 
 #if defined(EEPROM_SUPPORTED)
   /* Start the calibration process */
@@ -157,10 +164,10 @@ void loop() {
     panelMoveTracking(0, 0);
   }
   endTickTime = millis();
-  if(MOTORMOVE){
-    if((directions==DOWN_LA||directions==UP_LA)&&endTickTime-motorStartTime>=LIACDUTYCYCLE){
+  if (MOTORMOVE) {
+    if ((directions == DOWN_LA || directions == UP_LA) && endTickTime - motorStartTime >= LIACDUTYCYCLE) {
       panelMove(directions);
-    }else if((directions==LEFT_M||directions==RIGHT_M)&&endTickTime-motorStartTime>=MOTORDUTYCYCLE){
+    } else if ((directions == LEFT_M || directions == RIGHT_M) && endTickTime - motorStartTime >= MOTORDUTYCYCLE) {
       panelMove(directions);
     }
   }
@@ -173,7 +180,7 @@ void loop() {
   /* Calcuate the real X/Y position based on the calibration matrix */
   calibrateTSPoint(&calibrated, &raw, &_tsMatrix);
   // if (pressedOut)
-    // tft.fillCircle(calibrated.x, calibrated.y, 3, RA8875_RED);
+  // tft.fillCircle(calibrated.x, calibrated.y, 3, RA8875_RED);
 
   switch (state) {
     case SELF_CHECK:
@@ -184,7 +191,7 @@ void loop() {
       break;
 
     case MAIN_MENU:
-      displayTime(11, 11, 2023, 11, 45);
+      displayTime();
       if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 107 && calibrated.y < (107 + 85) && pressedOut) {
         panelMove(directions = UP_LA);
         pressedOut = false;
@@ -278,7 +285,7 @@ void loop() {
       }
       break;
     case SENSOR_MENU:
-      displayTime(11, 11, 2023, 11, 45);
+      displayTime();
       drawSensorTable(statPageCount);
       if (calibrated.x > 640 && calibrated.x < 800 && calibrated.y > 65 && calibrated.y < 65 + 70 * 2 && statPageCount > 0 && pressedOut) {
         statPageCount--;
@@ -412,14 +419,14 @@ void panelMove(moveDirection direc) {
     switch (direc) {
       case UP_LA:
         MOTORMOVE = true;
-        motorStartTime=millis();
+        motorStartTime = millis();
         //Serial.println("linear actuator move up");
         digitalWrite(LAUP, HIGH);
         laCount++;
         break;
       case DOWN_LA:
         MOTORMOVE = true;
-        motorStartTime=millis();
+        motorStartTime = millis();
         //Serial.println("linear actuator move down");
         digitalWrite(LADOWN, HIGH);
         laCount--;
@@ -427,13 +434,13 @@ void panelMove(moveDirection direc) {
       case LEFT_M:
         //Serial.println("motor move left");
         MOTORMOVE = true;
-        motorStartTime=millis();
+        motorStartTime = millis();
         digitalWrite(MOTORLEFT, HIGH);
         motorCount--;
         break;
       case RIGHT_M:
         MOTORMOVE = true;
-        motorStartTime=millis();
+        motorStartTime = millis();
         digitalWrite(MOTORRIGHT, HIGH);
         //Serial.println("motor move right");
         motorCount++;
@@ -443,7 +450,7 @@ void panelMove(moveDirection direc) {
         //move the panel until compass reads certain value
         break;
     }
-  }else{
+  } else {
     switch (direc) {
       case UP_LA:
         MOTORMOVE = false;
@@ -467,7 +474,7 @@ void panelMove(moveDirection direc) {
         break;
       case RST_BOTH:
         // Serial.println("rest panel to front");
-        
+
         break;
     }
   }
@@ -483,7 +490,7 @@ void drawMainMenu() {
   drawDirectionArrows(1);
 
 
-  displayTime(11, 11, 2023, 11, 45);
+  displayTime();
   drawPowerIcon();
   drawStatsIcon();
   drawRecordIcon(0);
@@ -516,7 +523,7 @@ void drawSensorList(int page) {
   tft.fillScreen(RA8875_BLACK);
   writeTxt(0, 0, "SENSOR LIST", RA8875_WHITE, 3, 0);
   tft.fillRect(0, 65, 800, 5, RA8875_WHITE);
-  displayTime(11, 11, 2023, 11, 45);
+  displayTime();
   //buttons
   tft.fillRect(640, 65, 5, 415, RA8875_WHITE);
   tft.fillRect(640, 65 + 70 * 2, 160, 5, RA8875_WHITE);
@@ -555,7 +562,7 @@ void drawRecordMenu() {
   tft.fillScreen(RA8875_BLACK);
   writeTxt(0, 0, "RECORD Schedule", RA8875_WHITE, 3, 0);
   tft.fillRect(0, 65, 800, 5, RA8875_WHITE);
-  displayTime(11, 11, 2023, 11, 45);
+  displayTime();
   writeTxt(15, 230, "START AT", RA8875_WHITE, 2, 0);
   tft.fillRect(230, 100, 120, 300, RA8875_WHITE);
   tft.fillRect(235, 105, 110, 290, RA8875_BLACK);
@@ -610,20 +617,22 @@ void displayOn() {
   tft.displayOn(true);
 }
 
-void displayTime(int month, int date, int year, int hour, int min) {
-  String time;
-  time = month;
-  time = time + "/";
-  time = time + date;
-  time = time + "/";
-  time = time + year;
-  time = time + " ";
-  time = time + hour;
-  time = time + ":";
-  time = time + min;
-  char output[50];
-  time.toCharArray(output, 50);
-  writeTxt(530, 30, output, RA8875_WHITE, 1, 1);
+void displayTime() {
+  if (RTC.read(tm)) {
+    String time = " ";
+    time = time + tm.Month;
+    time = time + "/";
+    time = time + tm.Day;
+    time = time + "/";
+    time = time + tmYearToCalendar(tm.Year);
+    time = time + " ";
+    time = time + tm.Hour;
+    time = time + ":";
+    time = time + tm.Minute;
+    char output[50];
+    time.toCharArray(output, 50);
+    writeTxt(530, 30, output, RA8875_WHITE, 1, 1);
+  }
 }
 
 void writeTxt(int x, int y, char *string, uint16_t foreColor, uint8_t size, int refresh) {

@@ -13,11 +13,6 @@
 
 #include <Arduino.h>
 
-#define BME_SCK 13
-#define BME_MISO 12
-#define BME_MOSI 11
-#define BME_CS 10
-
 #define SEALEVELPRESSURE_HPA (1013.25)
 
 Adafruit_BME280 bme; // I2C
@@ -37,8 +32,8 @@ char password[] = "7LCYhZVIwK";
 
 //ssid and pass refer to the specifications of the WiFi netwok being connected to
 
-char ssid[] = "407";    
-char pass[] = "Joshistall";       
+char ssid[] = "pards";    
+char pass[] = "";       
 
 //WiFiClient is used to create a connection to the mySQL database
 
@@ -49,7 +44,7 @@ MySQL_Connection conn((Client *)&client);
 
 void setup() {
   
-  Serial.begin(115200);   //Start the serial monitor
+  Serial.begin(9600);   //Start the serial monitor
 
   while (!Serial);    //loop until the serial monitor is established
 
@@ -76,8 +71,8 @@ void setup() {
 
     Serial.println();
 
-    float temp = bme.readTemperature();
-    float press = bme.readPressure() / 100.0F;
+    float temp = (bme.readTemperature() * (9/5)) + 32;
+    float press = (bme.readPressure() / 100.0F) * 0.030;
     float alt = bme.readAltitude(SEALEVELPRESSURE_HPA);
     float hum = bme.readHumidity();
 
@@ -105,8 +100,8 @@ void setup() {
 
   Serial.println("Connecting to Database...");                //Inform user that the system is now trying to connect to the database
 
-  char sqlQuery[] = "INSERT INTO sql9596235.sensors (temperature, pressure, altitude, humidity) VALUES (";
-  char deleteQuery[] = "DELETE FROM sensors";
+  char sqlQuery[] = "INSERT INTO sql9596235.tracked_sensors (temperature, pressure, altitude, humidity) VALUES (";
+  char deleteQuery[] = "DELETE FROM sql9596235.tracked_sensors";
 
   char temperature[8];
   char pressure[8];
@@ -127,7 +122,6 @@ void setup() {
   strcat(sqlQuery, humidity);
   strcat(sqlQuery, ")");
 
-  Serial.println(sqlQuery);
 
   if (conn.connect(server_addr, 3306, user, password)) {      //if the connection to the database at the specified location is true...
 
@@ -140,11 +134,15 @@ void setup() {
   }
 
   else Serial.println("Connection failed.");                  //connection has failed if it reaches this else statement
-    conn.close();                                                   //close the WiFi connection
+    conn.close();                                                  //close the WiFi connection
 }
 
 void loop() {
+    Serial.println("Looping");
+    
+    //tmElements_t tm;
     //printValues();
+    //Serial.println(tm.Hour);
     //delay(delayTime);
 }
 

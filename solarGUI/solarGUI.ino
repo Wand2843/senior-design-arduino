@@ -85,7 +85,9 @@ int startTickTime;
 int endTickTime;
 int motorStartTime;
 
+int powerPress;
 void setup() {
+  powerPress = 0;
   motorCount = 0;
   laCount = 0;
   WIFISTAT = true;
@@ -131,19 +133,25 @@ void setup() {
   tft.touchEnable(true);
 
 
-#if defined(EEPROM_SUPPORTED)
-  /* Start the calibration process */
-  if (FORCE_CALIBRATION || tft.readCalibration(EEPROMLOCATION, &_tsMatrix) == false) {
-    Serial.println("Calibration not found.  Calibrating..\n");
-    tsCalibrate();
-  } else
-    Serial.println("Calibration found\n");
-#else
-  tsCalibrate();
-#endif
+  // #if defined(EEPROM_SUPPORTED)
+  //   /* Start the calibration process */
+  //   if (FORCE_CALIBRATION || tft.readCalibration(EEPROMLOCATION, &_tsMatrix) == false) {
+  //     Serial.println("Calibration not found.  Calibrating..\n");
+  //     tsCalibrate();
+  //   } else
+  //     Serial.println("Calibration found\n");
+  // #else
+  //   tsCalibrate();
+  // #endif
   /* _tsMatrix should now be populated with the correct coefficients! */
   // Serial.println("Waiting for touch events ...");
-
+  _tsMatrix.Divider = -396278;
+  _tsMatrix.An = -329920;
+  _tsMatrix.Bn = 4160;
+  _tsMatrix.Cn = 8697440;
+  _tsMatrix.Dn = -1344;
+  _tsMatrix.En = -221376;
+  _tsMatrix.Fn = 25864608;
   tft.fillScreen(RA8875_BLACK);
   writeTxt(0, 100, "Initializing, please wait", RA8875_WHITE, 1, 0);
   // drawTestMenu();
@@ -179,8 +187,8 @@ void loop() {
 
   /* Calcuate the real X/Y position based on the calibration matrix */
   calibrateTSPoint(&calibrated, &raw, &_tsMatrix);
-  // if (pressedOut)
-  // tft.fillCircle(calibrated.x, calibrated.y, 3, RA8875_RED);
+  if (pressedOut)
+    tft.fillCircle(calibrated.x, calibrated.y, 3, RA8875_RED);
 
   switch (state) {
     case SELF_CHECK:
@@ -192,96 +200,106 @@ void loop() {
 
     case MAIN_MENU:
       displayTime();
-      if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 107 && calibrated.y < (107 + 85) && pressedOut) {
-        panelMove(directions = UP_LA);
-        pressedOut = false;
-      } else if (MANUALMODE && calibrated.x > 33 && calibrated.x < (33 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
-        panelMove(directions = LEFT_M);
-        pressedOut = false;
-      } else if (MANUALMODE && calibrated.x > 33 && calibrated.x < (33 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
-        panelMove(directions = LEFT_M);
-        pressedOut = false;
-      } else if (MANUALMODE && calibrated.x > 258 && calibrated.x < (258 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
-        panelMove(directions = RIGHT_M);
-        pressedOut = false;
-      } else if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 347 && calibrated.y < (347 + 85) && pressedOut) {
-        panelMove(directions = DOWN_LA);
-        pressedOut = false;
-      } else if (calibrated.x > 0 && calibrated.x < (0 + 130) && calibrated.y > 0 && calibrated.y < (0 + 170) && pressedOut) {
-        state = TEST_MENU;
-        drawTestMenu();
-        pressedOut = false;
-      } else if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
-        state = DISPLAY_OFF;
-        displayOff();
-        pressedOut = false;
-        debTime = 1000;
-        // delay(1000);
-
-      } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
-        state = SENSOR_MENU;
-        statPageCount = 0;
-        drawSensorList(statPageCount);
-        pressedOut = false;
-      } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
-        state = RECORD_MENU;
-        drawRecordMenu();
-        pressedOut = false;
-      } else if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
-        WIFISTAT = !WIFISTAT;
-        if (!WIFISTAT)
-          drawWiFiIcon(0);
-        else
-          drawWiFiIcon(1);
-        pressedOut = false;
-        setUpWifi(WIFISTAT);
-
-        delay(500);  //simulate setup
-      } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 340 && calibrated.y < (340 + 85) && pressedOut) {
-        switch (stState) {
-          case TRACKING_OFF:
-            MANUALMODE = false;
-            drawDirectionArrows(0);
-            panelMove(directions = RST_BOTH);
-            delay(1000);  //simulate panel move
-            MANUALMODE = true;
-            drawDirectionArrows(1);
-            break;
-          case FIXED_PATH:
-            drawRstIcon(2);
-            stState = SENSOR_TRACKING;
-            break;
-          case SENSOR_TRACKING:
-            drawRstIcon(1);
-            stState = FIXED_PATH;
-            break;
+      if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
+        powerPress=powerPress+1;
+        Serial.println(powerPress);
+        if (powerPress == 8) {
+          Serial.println(powerPress);
+          state = DISPLAY_OFF;
+          displayOff();
+          debTime = 1000;
+          powerPress = 0;
         }
-        pressedOut = false;
-      } else if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 340 && calibrated.y < (340 + 85) && pressedOut) {
-        switch (stState) {
-          case TRACKING_OFF:
-            drawAutoIcon(1);
-            drawRstIcon(1);
-            MANUALMODE = false;
-            drawDirectionArrows(0);
-            stState = FIXED_PATH;
-            break;
-          case FIXED_PATH:
-            drawAutoIcon(0);
-            drawRstIcon(0);
-            MANUALMODE = true;
-            drawDirectionArrows(1);
-            stState = TRACKING_OFF;
-            break;
-          case SENSOR_TRACKING:
-            drawAutoIcon(0);
-            drawRstIcon(0);
-            MANUALMODE = true;
-            drawDirectionArrows(1);
-            stState = TRACKING_OFF;
-            break;
+        pressedOut=false;
+      }
+      // delay(1000);
+
+      else if(pressedOut) {
+        powerPress = 0;
+        if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 107 && calibrated.y < (107 + 85) && pressedOut) {
+          panelMove(directions = UP_LA);
+          pressedOut = false;
+        } else if (MANUALMODE && calibrated.x > 33 && calibrated.x < (33 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
+          panelMove(directions = LEFT_M);
+          pressedOut = false;
+        } else if (MANUALMODE && calibrated.x > 33 && calibrated.x < (33 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
+          panelMove(directions = LEFT_M);
+          pressedOut = false;
+        } else if (MANUALMODE && calibrated.x > 258 && calibrated.x < (258 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
+          panelMove(directions = RIGHT_M);
+          pressedOut = false;
+        } else if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 347 && calibrated.y < (347 + 85) && pressedOut) {
+          panelMove(directions = DOWN_LA);
+          pressedOut = false;
+        } else if (calibrated.x > 0 && calibrated.x < (0 + 130) && calibrated.y > 0 && calibrated.y < (0 + 170) && pressedOut) {
+          state = TEST_MENU;
+          drawTestMenu();
+          pressedOut = false;
+        } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
+          state = SENSOR_MENU;
+          statPageCount = 0;
+          drawSensorList(statPageCount);
+          pressedOut = false;
+        } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
+          state = RECORD_MENU;
+          drawRecordMenu();
+          pressedOut = false;
+        } else if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
+          WIFISTAT = !WIFISTAT;
+          if (!WIFISTAT)
+            drawWiFiIcon(0);
+          else
+            drawWiFiIcon(1);
+          pressedOut = false;
+          setUpWifi(WIFISTAT);
+
+          delay(500);  //simulate setup
+        } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 340 && calibrated.y < (340 + 85) && pressedOut) {
+          switch (stState) {
+            case TRACKING_OFF:
+              MANUALMODE = false;
+              drawDirectionArrows(0);
+              panelMove(directions = RST_BOTH);
+              delay(1000);  //simulate panel move
+              MANUALMODE = true;
+              drawDirectionArrows(1);
+              break;
+            case FIXED_PATH:
+              drawRstIcon(2);
+              stState = SENSOR_TRACKING;
+              break;
+            case SENSOR_TRACKING:
+              drawRstIcon(1);
+              stState = FIXED_PATH;
+              break;
+          }
+          pressedOut = false;
+        } else if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 340 && calibrated.y < (340 + 85) && pressedOut) {
+          switch (stState) {
+            case TRACKING_OFF:
+              drawAutoIcon(1);
+              drawRstIcon(1);
+              MANUALMODE = false;
+              drawDirectionArrows(0);
+              stState = FIXED_PATH;
+              break;
+            case FIXED_PATH:
+              drawAutoIcon(0);
+              drawRstIcon(0);
+              MANUALMODE = true;
+              drawDirectionArrows(1);
+              stState = TRACKING_OFF;
+              break;
+            case SENSOR_TRACKING:
+              drawAutoIcon(0);
+              drawRstIcon(0);
+              MANUALMODE = true;
+              drawDirectionArrows(1);
+              stState = TRACKING_OFF;
+              break;
+          }
+          pressedOut = false;
         }
-        pressedOut = false;
       }
       break;
     case SENSOR_MENU:
@@ -921,7 +939,13 @@ int setCalibrationMatrix(tsPoint_t *displayPtr, tsPoint_t *screenPtr, tsMatrix_t
     tft.writeCalibration(EEPROMLOCATION, matrixPtr);
 #endif
   }
-
+  Serial.println(matrixPtr->Divider);
+  Serial.println(matrixPtr->An);
+  Serial.println(matrixPtr->Bn);
+  Serial.println(matrixPtr->Cn);
+  Serial.println(matrixPtr->Dn);
+  Serial.println(matrixPtr->En);
+  Serial.println(matrixPtr->Fn);
   return (retValue);
 }
 

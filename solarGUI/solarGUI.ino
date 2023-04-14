@@ -1,3 +1,8 @@
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+#include <Adafruit_LSM303_Accel.h>
+#include <Adafruit_LIS2MDL.h>
+
 #include <SPI.h>
 #include <math.h>
 #include "Adafruit_GFX.h"
@@ -11,6 +16,11 @@
 #include <TimeLib.h>
 #include <DS1307RTC.h>
 
+#include <WiFiNINA.h>
+
+#define SEALEVELPRESSURE_HPA (1013.25)
+Adafruit_BME280 bme;
+
 // Library only supports hardware SPI at this time
 // Connect SCLK to UNO Digital #13 (Hardware SPI clock)
 // Connect MISO to UNO Digital #12 (Hardware SPI MISO)
@@ -20,12 +30,17 @@
 #define RA8875_RESET 9
 
 #define MOTORLEFT 3
-#define MOTORRIGHT 7
+#define MOTORLDELAY 2
+#define MOTORRIGHT 17
+#define MOTORRDELAY 16
 #define LAUP 4
 #define LADOWN 5
+#define LAUPDELAY 6
+#define LADOWNDELAY 0
 
 #define MOTORDUTYCYCLE 10
-#define LIACDUTYCYCLE 100
+#define LIACDUTYCYCLE 10
+#define GATEDEALY 10
 
 Adafruit_RA8875 tft = Adafruit_RA8875(RA8875_CS, RA8875_RESET);
 uint16_t tx, ty;
@@ -35,10 +50,34 @@ tsMatrix_t _tsMatrix;
 
 tmElements_t tm;
 
+uint8_t battery_soc;             // percent
+float battery_voltage;           // volts
+float battery_charging_amps;     // amps
+uint8_t battery_temperature;     // celcius
+uint8_t controller_temperature;  // celcius
+float load_voltage;              // volts
+float load_amps;                 // amps
+uint8_t load_watts;              // watts
+float solar_panel_voltage;       // volts
+float solar_panel_amps;          // amps
+uint8_t solar_panel_watts;       // watts
+
+float enviornment_temp;      //C
+float enviornment_pressure;  //hPa
+float enviornment_humidity;  //%
+float enviornment_altitude;  //m
+
+Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(54321);
+float angle;
+
+Adafruit_LIS2MDL mag = Adafruit_LIS2MDL(12345);
+float heading;
+
 bool WIFISTAT;
 bool MANUALMODE;
 bool PHOTOTRACKING;
 bool MOTORMOVE;
+bool MOTORMOVEDELAY;
 bool LIACMOVE;
 
 int motorCount;
@@ -64,8 +103,10 @@ enum guiStates {
   DISPLAY_OFF,
   RECORD_MENU,
   SENSOR_MENU,
-  TEST_MENU
-} state;
+  TEST_MENU,
+  WIFI_MENU
+} state,
+  prevState;
 
 enum trackingStates {
   TRACKING_OFF,
@@ -84,19 +125,37 @@ enum moveDirection {
 int startTickTime;
 int endTickTime;
 int motorStartTime;
+int motorStartTimeDelay;
 
 int powerPress;
 void setup() {
+
   powerPress = 0;
   motorCount = 0;
   laCount = 0;
-  WIFISTAT = true;
+  WIFISTAT = false;
   MANUALMODE = true;
   PHOTOTRACKING = false;
   MOTORMOVE = false;
+  MOTORMOVEDELAY = false;
   LIACMOVE = false;
   stState = TRACKING_OFF;
   state = SELF_CHECK;
+  prevState = state;
+  unsigned status;
+  status = bme.begin();
+  if (!status) {
+    Serial.println("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
+    Serial.print("SensorID was: 0x");
+    Serial.println(bme.sensorID(), 16);
+    Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n");
+    Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
+    Serial.print("        ID of 0x60 represents a BME 280.\n");
+    Serial.print("        ID of 0x61 represents a BME 680.\n");
+  }
+  accelSetup();
+  magSetup();
+
   setUpWifi(WIFISTAT);
   initDebouncer();
 
@@ -111,6 +170,19 @@ void setup() {
 
   pinMode(LAUP, OUTPUT);
   digitalWrite(LAUP, LOW);
+
+  pinMode(MOTORLDELAY, OUTPUT);
+  digitalWrite(MOTORLDELAY, LOW);
+
+  pinMode(MOTORRDELAY, OUTPUT);
+  digitalWrite(MOTORRDELAY, LOW);
+
+  pinMode(LADOWNDELAY, OUTPUT);
+  digitalWrite(LADOWNDELAY, LOW);
+
+  pinMode(LAUPDELAY, OUTPUT);
+  digitalWrite(LAUPDELAY, LOW);
+
 
   Serial.begin(9600);
   Serial.println("RA8875 start");
@@ -167,17 +239,50 @@ bool pressedOut;
 int debTime = 100;
 
 void loop() {
+  // int sensorValue = analogRead(A7);
+  // float voltage= sensorValue * (5.0 / 1023.0);
+  // Serial.println(voltage);
   // put your main code here, to run repeatedly:
-  if (stState == FIXED_PATH || SENSOR_TRACKING) {
-    panelMoveTracking(0, 0);
-  }
+  // if (stState == FIXED_PATH || SENSOR_TRACKING) {
+  //   panelMoveTracking(0, 0);
+  // }
+  // accelPoll();
+  // magPoll();
+  // bmeData();
+  // Serial.println("bmeTemp:");
+  // Serial.println(enviornment_temp);
+  // Serial.println("bmePress:");
+  // Serial.println(enviornment_pressure);
+  // Serial.println("bmeHum:");
+  // Serial.println(enviornment_humidity);
+  // Serial.println("bmeAlt:");
+  // Serial.println(enviornment_altitude);
+  // Serial.println("accelAngle:");
+  // Serial.println(angle);
+  // Serial.println("magAngle:");
+  // Serial.println(heading);
+  // delay(100);
   endTickTime = millis();
   if (MOTORMOVE) {
     if ((directions == DOWN_LA || directions == UP_LA) && endTickTime - motorStartTime >= LIACDUTYCYCLE) {
       panelMove(directions);
-    } else if ((directions == LEFT_M || directions == RIGHT_M) && endTickTime - motorStartTime >= MOTORDUTYCYCLE) {
+      motorStartTime = millis();
+    } else if ((directions == LEFT_M || directions == RIGHT_M) && (endTickTime - motorStartTime) >= MOTORDUTYCYCLE) {
       panelMove(directions);
+      motorStartTime = millis();
+      // Serial.println(MOTORDUTYCYCLE);
     }
+  }
+  if (MOTORMOVEDELAY) {
+    if ((directions == DOWN_LA || directions == UP_LA) && endTickTime - motorStartTimeDelay >= LIACDUTYCYCLE + GATEDEALY) {
+      panelMoveDelay(directions);
+      motorStartTimeDelay = millis();
+    } else if ((directions == LEFT_M || directions == RIGHT_M) && (endTickTime - motorStartTimeDelay) >= MOTORDUTYCYCLE + GATEDEALY) {
+      panelMoveDelay(directions);
+      motorStartTimeDelay = millis();
+      // Serial.println(MOTORDUTYCYCLE);
+    }
+    // MOTORMOVE = false;
   }
   if ((endTickTime - startTickTime) > debTime) {
     if (debTime = 1000) debTime = 100;
@@ -193,67 +298,90 @@ void loop() {
   switch (state) {
     case SELF_CHECK:
       if (selfCheck()) {
+        prevState = state;
         state = MAIN_MENU;
+
         drawMainMenu();
       }
       break;
 
     case MAIN_MENU:
       displayTime();
+      if(WIFISTAT)writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
+      else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
       if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
-        powerPress=powerPress+1;
-        Serial.println(powerPress);
+        powerPress = powerPress + 1;
+        // Serial.println(powerPress);
         if (powerPress == 8) {
-          Serial.println(powerPress);
+          // Serial.println(powerPress);
+          prevState = state;
           state = DISPLAY_OFF;
           displayOff();
           debTime = 1000;
           powerPress = 0;
         }
-        pressedOut=false;
+        pressedOut = false;
       }
       // delay(1000);
 
-      else if(pressedOut) {
+      else if (pressedOut) {
         powerPress = 0;
         if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 107 && calibrated.y < (107 + 85) && pressedOut) {
           panelMove(directions = UP_LA);
+          panelMoveDelay(directions = UP_LA);
+          // MOTORMOVE = true;
           pressedOut = false;
         } else if (MANUALMODE && calibrated.x > 33 && calibrated.x < (33 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
           panelMove(directions = LEFT_M);
-          pressedOut = false;
-        } else if (MANUALMODE && calibrated.x > 33 && calibrated.x < (33 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
-          panelMove(directions = LEFT_M);
+          panelMoveDelay(directions = LEFT_M);
+          // MOTORMOVE = true;
           pressedOut = false;
         } else if (MANUALMODE && calibrated.x > 258 && calibrated.x < (258 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
           panelMove(directions = RIGHT_M);
+          panelMoveDelay(directions = RIGHT_M);
+          // MOTORMOVE = true;
           pressedOut = false;
         } else if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 347 && calibrated.y < (347 + 85) && pressedOut) {
           panelMove(directions = DOWN_LA);
+          panelMoveDelay(directions = DOWN_LA);
+          // MOTORMOVE = true;
           pressedOut = false;
         } else if (calibrated.x > 0 && calibrated.x < (0 + 130) && calibrated.y > 0 && calibrated.y < (0 + 170) && pressedOut) {
+          prevState = state;
           state = TEST_MENU;
           drawTestMenu();
           pressedOut = false;
         } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
+          prevState = state;
           state = SENSOR_MENU;
           statPageCount = 0;
           drawSensorList(statPageCount);
           pressedOut = false;
         } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
+          prevState = state;
           state = RECORD_MENU;
           drawRecordMenu();
           pressedOut = false;
         } else if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
-          WIFISTAT = !WIFISTAT;
-          if (!WIFISTAT)
-            drawWiFiIcon(0);
-          else
-            drawWiFiIcon(1);
-          pressedOut = false;
-          setUpWifi(WIFISTAT);
+          // WIFISTAT = true;
+          prevState = state;
+          state = WIFI_MENU;
+          drawWiFiIcon(1);
+          drawRstIcon(0, 0);
+          drawStatsIcon(0);
 
-          delay(500);  //simulate setup
+          MANUALMODE = false;
+          stState = FIXED_PATH;
+          drawRecordIcon(2);
+          drawAutoIcon(1);
+
+          pressedOut = false;
+          tft.fillRect(0, 101, 400, 380, RA8875_BLACK);
+          writeTxt(0, 101, "Server overwrite,", RA8875_WHITE, 2, 0);
+          writeTxt(0, 150, "press WiFi to", RA8875_WHITE, 2, 0);
+          writeTxt(0, 200, "cancel.", RA8875_WHITE, 2, 0);
+          setUpWifi(true);
+          // delay(500);  //simulate setup
         } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 340 && calibrated.y < (340 + 85) && pressedOut) {
           switch (stState) {
             case TRACKING_OFF:
@@ -265,11 +393,11 @@ void loop() {
               drawDirectionArrows(1);
               break;
             case FIXED_PATH:
-              drawRstIcon(2);
+              drawRstIcon(2, 1);
               stState = SENSOR_TRACKING;
               break;
             case SENSOR_TRACKING:
-              drawRstIcon(1);
+              drawRstIcon(1, 1);
               stState = FIXED_PATH;
               break;
           }
@@ -278,26 +406,70 @@ void loop() {
           switch (stState) {
             case TRACKING_OFF:
               drawAutoIcon(1);
-              drawRstIcon(1);
+              drawRstIcon(1, 1);
               MANUALMODE = false;
               drawDirectionArrows(0);
               stState = FIXED_PATH;
               break;
             case FIXED_PATH:
               drawAutoIcon(0);
-              drawRstIcon(0);
+              drawRstIcon(0, 1);
               MANUALMODE = true;
               drawDirectionArrows(1);
               stState = TRACKING_OFF;
               break;
             case SENSOR_TRACKING:
               drawAutoIcon(0);
-              drawRstIcon(0);
+              drawRstIcon(0, 1);
               MANUALMODE = true;
               drawDirectionArrows(1);
               stState = TRACKING_OFF;
               break;
           }
+          pressedOut = false;
+        }
+      }
+      break;
+    case WIFI_MENU:
+      displayTime();
+      if(WIFISTAT)writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
+      else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
+      if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
+        powerPress = powerPress + 1;
+        // Serial.println(powerPress);
+        if (powerPress == 8) {
+          // Serial.println(powerPress);
+          prevState = state;
+          state = DISPLAY_OFF;
+          displayOff();
+          debTime = 1000;
+          powerPress = 0;
+        }
+        pressedOut = false;
+      } else if (pressedOut) {
+        powerPress=0;
+        if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
+          // WIFISTAT = false;
+          prevState = state;
+          state = MAIN_MENU;
+          setUpWifi(false);
+          drawWiFiIcon(0);
+          drawRstIcon(0, 1);
+          drawStatsIcon(1);
+
+          MANUALMODE = true;
+          stState = FIXED_PATH;
+
+          drawAutoIcon(0);
+
+          pressedOut = false;
+          tft.fillRect(0, 101, 400, 380, RA8875_BLACK);
+          writeTxt(440, 295, "Re-Connect", RA8875_BLACK, 1, 1);
+          drawRecordIcon(0);
+          drawDirectionArrows(1);
+          // delay(500);  //simulate setup
+        }else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut){
+          Serial.println("connect shits");
           pressedOut = false;
         }
       }
@@ -318,6 +490,7 @@ void loop() {
         // delay(100);
         pressedOut = false;
       } else if (calibrated.x > 640 && calibrated.x < 800 && calibrated.y > 65 + 70 * 4 && calibrated.y < 800 && pressedOut) {
+        prevState = state;
         state = MAIN_MENU;
         drawMainMenu();
         pressedOut = false;
@@ -325,6 +498,7 @@ void loop() {
       break;
     case TEST_MENU:
       if (calibrated.x > 0 && calibrated.x < (0 + 160) && calibrated.y > 360 && calibrated.y < (360 + 120) && pressedOut) {
+        prevState = state;
         state = MAIN_MENU;
         drawMainMenu();
         pressedOut = false;
@@ -334,7 +508,8 @@ void loop() {
       if (tft.touched() && pressedOut) {
         debTime = 1000;
         displayOn();
-        state = MAIN_MENU;
+        state=prevState;
+        prevState = DISPLAY_OFF;
         // delay(1000);
         pressedOut = false;
       }
@@ -405,6 +580,7 @@ void loop() {
         }
         pressedOut = false;
       } else if (calibrated.x > 0 && calibrated.x < 0 + 160 && calibrated.y > 360 && calibrated.y < 480 && pressedOut) {
+        prevState = state;
         state = MAIN_MENU;
         drawMainMenu();
         pressedOut = false;
@@ -430,27 +606,29 @@ void setUpWifi(bool on) {
   if (on) Serial.println("turn WiFi on");  //set wifi on
   else Serial.println("turn WiFi off");
   ;  //set wifi off
+  bool success =false;
+  WIFISTAT=success;
 }
-
+// boolean motorSignalOn = false;
 void panelMove(moveDirection direc) {
   if (MOTORMOVE == false) {
     switch (direc) {
       case UP_LA:
         MOTORMOVE = true;
         motorStartTime = millis();
-        //Serial.println("linear actuator move up");
+        // Serial.println("linear actuator move up");
         digitalWrite(LAUP, HIGH);
         laCount++;
         break;
       case DOWN_LA:
         MOTORMOVE = true;
         motorStartTime = millis();
-        //Serial.println("linear actuator move down");
+        // Serial.println("linear actuator move down");
         digitalWrite(LADOWN, HIGH);
         laCount--;
         break;
       case LEFT_M:
-        //Serial.println("motor move left");
+        // Serial.println("motor move left");
         MOTORMOVE = true;
         motorStartTime = millis();
         digitalWrite(MOTORLEFT, HIGH);
@@ -460,7 +638,7 @@ void panelMove(moveDirection direc) {
         MOTORMOVE = true;
         motorStartTime = millis();
         digitalWrite(MOTORRIGHT, HIGH);
-        //Serial.println("motor move right");
+        // Serial.println("motor move right");
         motorCount++;
         break;
       case RST_BOTH:
@@ -498,6 +676,72 @@ void panelMove(moveDirection direc) {
   }
 }
 
+void panelMoveDelay(moveDirection direc) {
+  if (MOTORMOVEDELAY == false) {
+    switch (direc) {
+      case UP_LA:
+        MOTORMOVEDELAY = true;
+        motorStartTimeDelay = millis();
+        // Serial.println("linear actuator move up");
+        digitalWrite(LAUPDELAY, HIGH);
+        // laCount++;
+        break;
+      case DOWN_LA:
+        MOTORMOVEDELAY = true;
+        motorStartTimeDelay = millis();
+        // Serial.println("linear actuator move down");
+        digitalWrite(LADOWNDELAY, HIGH);
+        // laCount--;
+        break;
+      case LEFT_M:
+        // Serial.println("motor move left");
+        MOTORMOVEDELAY = true;
+        motorStartTimeDelay = millis();
+        digitalWrite(MOTORLDELAY, HIGH);
+        // motorCount--;
+        break;
+      case RIGHT_M:
+        MOTORMOVEDELAY = true;
+        motorStartTimeDelay = millis();
+        digitalWrite(MOTORRDELAY, HIGH);
+        // Serial.println("motor move right");
+        // motorCount++;
+        break;
+      case RST_BOTH:
+        //Serial.println("rest panel to front");
+        //move the panel until compass reads certain value
+        break;
+    }
+  } else {
+    switch (direc) {
+      case UP_LA:
+        MOTORMOVEDELAY = false;
+        digitalWrite(LAUPDELAY, LOW);
+        //Serial.println("linear actuator move up STOP");
+        break;
+      case DOWN_LA:
+        MOTORMOVEDELAY = false;
+        digitalWrite(LADOWNDELAY, LOW);
+        // Serial.println("linear actuator move down STOP");
+        break;
+      case LEFT_M:
+        MOTORMOVEDELAY = false;
+        digitalWrite(MOTORLDELAY, LOW);
+        // Serial.println("motor move left STOP");
+        break;
+      case RIGHT_M:
+        MOTORMOVEDELAY = false;
+        digitalWrite(MOTORRDELAY, LOW);
+        // Serial.println("motor move right STOP");
+        break;
+      case RST_BOTH:
+        // Serial.println("rest panel to front");
+
+        break;
+    }
+  }
+}
+
 void drawMainMenu() {
   tft.fillScreen(RA8875_BLACK);
   tft.fillRect(0, 65, 800, 5, RA8875_WHITE);
@@ -510,10 +754,10 @@ void drawMainMenu() {
 
   displayTime();
   drawPowerIcon();
-  drawStatsIcon();
+  drawStatsIcon(1);
   drawRecordIcon(0);
-  drawWiFiIcon(1);
-  drawRstIcon(0);
+  drawWiFiIcon(0);
+  drawRstIcon(0, 1);
   drawAutoIcon(0);
 }
 
@@ -700,11 +944,18 @@ void drawPowerIcon() {
   tft.fillRect(680, 95, 10, 10, RA8875_WHITE);
   tft.fillRect(683, 85, 5, 30, RA8875_BLACK);
 }
-void drawStatsIcon() {
-  tft.fillRoundRect(460, 76, 117, 85, 20, RA8875_WHITE);
-  writeTxt(470, 85, "SENSOR", RA8875_BLACK, 1, 0);
-  writeTxt(475, 115, "STATS", RA8875_BLACK, 1, 0);
-  writeTxt(479, 161, "STATS", RA8875_WHITE, 1, 0);
+void drawStatsIcon(int on) {
+  if (on == 1) {
+    tft.fillRoundRect(460, 76, 117, 85, 20, RA8875_WHITE);
+    writeTxt(470, 85, "SENSOR", RA8875_BLACK, 1, 0);
+    writeTxt(475, 115, "STATS", RA8875_BLACK, 1, 0);
+    writeTxt(479, 161, "STATS", RA8875_WHITE, 1, 0);
+  } else {
+    tft.fillRoundRect(460, 76, 117, 85, 20, 0x7BEF);
+    writeTxt(470, 85, "SENSOR", RA8875_WHITE, 1, 0);
+    writeTxt(475, 115, "STATS", RA8875_WHITE, 1, 0);
+    writeTxt(479, 161, "STATS", RA8875_WHITE, 1, 0);
+  }
 }
 
 void drawRecordIcon(int on) {
@@ -714,13 +965,17 @@ void drawRecordIcon(int on) {
     tft.fillCircle(518, 252, 25, RA8875_RED);
   } else if (on == 0) {
     tft.fillCircle(518, 252, 25, RA8875_BLACK);
+  } else if (on == 2) {
+    tft.fillRoundRect(460, 210, 117, 85, 20, RA8875_WHITE);
+    writeTxt(485, 220, "RE", RA8875_BLACK, 3, 0);
+    writeTxt(440, 295, "Re-Connect", RA8875_WHITE, 1, 1);
   }
 }
 
 void drawWiFiIcon(int on) {
   tft.fillRoundRect(627, 210, 117, 85, 20, RA8875_WHITE);
   if (on == 1) {
-    writeTxt(627, 295, "WiFi(ON)", RA8875_WHITE, 1, 1);
+    writeTxt(620, 295, "WiFi (ON)", RA8875_WHITE, 1, 1);
     tft.fillRect(650, 255, 20, 35, RA8875_BLACK);
     tft.fillRect(675, 235, 20, 55, RA8875_BLACK);
     tft.fillRect(700, 215, 20, 75, RA8875_BLACK);
@@ -732,22 +987,29 @@ void drawWiFiIcon(int on) {
   }
 }
 
-void drawRstIcon(int state) {
-  if (state == 0) {
-    tft.fillRoundRect(460, 340, 117, 85, 20, RA8875_WHITE);
-    writeTxt(477, 350, "PANEL", RA8875_BLACK, 1, 0);
-    writeTxt(477, 380, "RESET", RA8875_BLACK, 1, 0);
-    writeTxt(480, 427, "RESET", RA8875_WHITE, 1, 1);
-  } else if (state == 1) {
+void drawRstIcon(int state, int on) {
+  if (on == 1) {
+    if (state == 0) {
+      tft.fillRoundRect(460, 340, 117, 85, 20, RA8875_WHITE);
+      writeTxt(477, 350, "PANEL", RA8875_BLACK, 1, 0);
+      writeTxt(477, 380, "RESET", RA8875_BLACK, 1, 0);
+      writeTxt(480, 427, "RESET", RA8875_WHITE, 1, 1);
+    } else if (state == 1) {
+      tft.fillRoundRect(460, 340, 117, 85, 20, 0x7BEF);
+      writeTxt(475, 350, "LIGHT", RA8875_WHITE, 1, 0);
+      writeTxt(475, 380, "SENSOR", RA8875_WHITE, 1, 0);
+      writeTxt(480, 427, "(OFF)", RA8875_WHITE, 1, 1);
+    } else if (state == 2) {
+      tft.fillRoundRect(460, 340, 117, 85, 20, RA8875_WHITE);
+      writeTxt(475, 350, "LIGHT", RA8875_BLACK, 1, 0);
+      writeTxt(475, 380, "SENSOR", RA8875_BLACK, 1, 0);
+      writeTxt(480, 427, "(ON )", RA8875_WHITE, 1, 1);
+    }
+  } else if (on == 0) {
     tft.fillRoundRect(460, 340, 117, 85, 20, 0x7BEF);
-    writeTxt(475, 350, "LIGHT", RA8875_WHITE, 1, 0);
-    writeTxt(475, 380, "SENSOR", RA8875_WHITE, 1, 0);
-    writeTxt(480, 427, "(OFF)", RA8875_WHITE, 1, 1);
-  } else if (state == 2) {
-    tft.fillRoundRect(460, 340, 117, 85, 20, RA8875_WHITE);
-    writeTxt(475, 350, "LIGHT", RA8875_BLACK, 1, 0);
-    writeTxt(475, 380, "SENSOR", RA8875_BLACK, 1, 0);
-    writeTxt(480, 427, "(ON )", RA8875_WHITE, 1, 1);
+    writeTxt(477, 350, "PANEL", RA8875_WHITE, 1, 0);
+    writeTxt(477, 380, "RESET", RA8875_WHITE, 1, 0);
+    writeTxt(480, 427, "RESET", RA8875_WHITE, 1, 1);
   }
 }
 
@@ -961,4 +1223,100 @@ void drawBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t 
       if (byte & 0x80) tft.drawPixel(x + i, y + j, color);
     }
   }
+}
+
+//pull data from charge controller
+void CCData() {
+  Wire.requestFrom(8, 27);  // request 27 bytes from slave device #8
+  while (Wire.available()) {
+    battery_soc = Wire.read();
+    Wire.readBytes((byte *)&battery_voltage, sizeof(float));
+    Wire.readBytes((byte *)&battery_charging_amps, sizeof(float));
+    battery_temperature = Wire.read();
+    controller_temperature = Wire.read();
+    Wire.readBytes((byte *)&load_voltage, sizeof(float));
+    Wire.readBytes((byte *)&load_amps, sizeof(float));
+    load_watts = Wire.read();
+    Wire.readBytes((byte *)&solar_panel_voltage, sizeof(float));
+    Wire.readBytes((byte *)&solar_panel_amps, sizeof(float));
+    solar_panel_watts = Wire.read();
+  }
+}
+
+void bmeData() {
+  enviornment_temp = bme.readTemperature();
+  enviornment_pressure = (bme.readPressure() / 100.0F);
+  enviornment_humidity = bme.readAltitude(SEALEVELPRESSURE_HPA);
+  enviornment_altitude = bme.readHumidity();
+}
+
+void accelSetup() {
+  if (!accel.begin()) {
+    /* There was a problem detecting the ADXL345 ... check your connections */
+    Serial.println("Ooops, no LSM303 detected ... Check your wiring!");
+    while (1)
+      ;
+  }
+  /* Display some basic information on this sensor */
+  //displaySensorDetails();
+  accel.setRange(LSM303_RANGE_4G);
+  //Serial.print("Range set to: ");
+  lsm303_accel_range_t new_range = accel.getRange();
+  switch (new_range) {
+    case LSM303_RANGE_2G:
+      //Serial.println("+- 2G");
+      break;
+    case LSM303_RANGE_4G:
+      //Serial.println("+- 4G");
+      break;
+    case LSM303_RANGE_8G:
+      //Serial.println("+- 8G");
+      break;
+    case LSM303_RANGE_16G:
+      //Serial.println("+- 16G");
+      break;
+  }
+  accel.setMode(LSM303_MODE_NORMAL);
+  //Serial.print("Mode set to: ");
+  lsm303_accel_mode_t new_mode = accel.getMode();
+  switch (new_mode) {
+    case LSM303_MODE_NORMAL:
+      //Serial.println("Normal");
+      break;
+    case LSM303_MODE_LOW_POWER:
+      //Serial.println("Low Power");
+      break;
+    case LSM303_MODE_HIGH_RESOLUTION:
+      //Serial.println("High Resolution");
+      break;
+  }
+}
+
+
+void accelPoll() {
+  sensors_event_t event;
+  accel.getEvent(&event);
+  float Pi = 3.14159;
+  angle = (atan2(event.acceleration.y, event.acceleration.z) * 180) / Pi;
+}
+
+void magSetup() {
+  if (!mag.begin()) {
+    /* There wasa problem detecting the LIS2MDL ... check your connections */
+    Serial.println("Ooops, no LIS2MDL detected ... Check your wiring!");
+    while (1)
+      ;
+  }
+}
+
+void magPoll() {
+  sensors_event_t event;
+  mag.getEvent(&event);
+
+  float Pi = 3.14159;
+
+  // Calculate the angle of the vector y,x
+  float offsety = 65 + event.magnetic.y;
+  float offsetx = 60 + event.magnetic.x;
+  heading = ((atan2(offsety, offsetx)) * 180) / Pi;
 }

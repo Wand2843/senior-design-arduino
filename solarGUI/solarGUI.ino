@@ -29,18 +29,22 @@ Adafruit_BME280 bme;
 #define RA8875_CS 10
 #define RA8875_RESET 9
 
-#define MOTORLEFT 3
+#define MOTORLEFT 0
 #define MOTORLDELAY 2
-#define MOTORRIGHT 17
-#define MOTORRDELAY 16
+#define MOTORRIGHT 1
+#define MOTORRDELAY 3
 #define LAUP 4
 #define LADOWN 5
 #define LAUPDELAY 6
-#define LADOWNDELAY 0
+#define LADOWNDELAY 7
 
 #define MOTORDUTYCYCLE 10
 #define LIACDUTYCYCLE 10
-#define GATEDEALY 10
+#define GATEDEALY 230
+
+#define ONESECOND 60000
+
+#define LATITUDE 40
 
 Adafruit_RA8875 tft = Adafruit_RA8875(RA8875_CS, RA8875_RESET);
 uint16_t tx, ty;
@@ -72,6 +76,12 @@ float angle;
 
 Adafruit_LIS2MDL mag = Adafruit_LIS2MDL(12345);
 float heading;
+
+float baseAngleAzi;
+float baseAngleAlt;
+
+float altAngleAim = 0;
+float aziAngleAim = 0;
 
 bool WIFISTAT;
 bool MANUALMODE;
@@ -128,7 +138,18 @@ int motorStartTime;
 int motorStartTimeDelay;
 
 int powerPress;
+
+tsPoint_t raw;
+tsPoint_t calibrated;
+bool pressedOut;
+int debTime = 250;
+bool pollClock = false;
+
+
 void setup() {
+
+
+  pollClock = false;
 
   powerPress = 0;
   motorCount = 0;
@@ -143,18 +164,18 @@ void setup() {
   state = SELF_CHECK;
   prevState = state;
   unsigned status;
-  status = bme.begin();
-  if (!status) {
-    Serial.println("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
-    Serial.print("SensorID was: 0x");
-    Serial.println(bme.sensorID(), 16);
-    Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n");
-    Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
-    Serial.print("        ID of 0x60 represents a BME 280.\n");
-    Serial.print("        ID of 0x61 represents a BME 680.\n");
-  }
-  accelSetup();
-  magSetup();
+  // status = bme.begin();
+  // if (!status) {
+  //   Serial.println("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
+  //   Serial.print("SensorID was: 0x");
+  //   Serial.println(bme.sensorID(), 16);
+  //   Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n");
+  //   Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
+  //   Serial.print("        ID of 0x60 represents a BME 280.\n");
+  //   Serial.print("        ID of 0x61 represents a BME 680.\n");
+  // }
+  // accelSetup();
+  // magSetup();
 
   setUpWifi(WIFISTAT);
   initDebouncer();
@@ -231,12 +252,15 @@ void setup() {
   //delay(5000);
   //screenOff();
   startTickTime = millis();
+  // magPoll();
+  // accelPoll();
+  baseAngleAlt=angle;
+  baseAngleAzi=heading;
+  altAngleAim = baseAngleAlt;
+  aziAngleAim = baseAngleAzi;
 }
 
-tsPoint_t raw;
-tsPoint_t calibrated;
-bool pressedOut;
-int debTime = 100;
+
 
 void loop() {
   // int sensorValue = analogRead(A7);
@@ -263,6 +287,25 @@ void loop() {
   // Serial.println(heading);
   // delay(100);
   endTickTime = millis();
+  motorFlipFlop();
+  trackingMove();
+  if ((endTickTime - startTickTime) > debTime) {
+    if (debTime = 1000) debTime = 100;
+    pressedOut = tick_Debouncer(waitForTouchEvent(&raw));
+    startTickTime = endTickTime;
+  }
+
+  if ((endTickTime - startTickTime) > ONESECOND) {
+    pollClock = true;
+  }
+
+
+  /* Calcuate the real X/Y position based on the calibration matrix */
+  calibrateTSPoint(&calibrated, &raw, &_tsMatrix);
+  fsmTick();
+}
+
+void motorFlipFlop() {
   if (MOTORMOVE) {
     if ((directions == DOWN_LA || directions == UP_LA) && endTickTime - motorStartTime >= LIACDUTYCYCLE) {
       panelMove(directions);
@@ -277,21 +320,64 @@ void loop() {
     if ((directions == DOWN_LA || directions == UP_LA) && endTickTime - motorStartTimeDelay >= LIACDUTYCYCLE + GATEDEALY) {
       panelMoveDelay(directions);
       motorStartTimeDelay = millis();
+      if (MANUALMODE && state == MAIN_MENU) {
+        drawDirectionArrows(1);
+      }
     } else if ((directions == LEFT_M || directions == RIGHT_M) && (endTickTime - motorStartTimeDelay) >= MOTORDUTYCYCLE + GATEDEALY) {
       panelMoveDelay(directions);
       motorStartTimeDelay = millis();
+      if (MANUALMODE && state == MAIN_MENU) {
+        drawDirectionArrows(1);
+      }
       // Serial.println(MOTORDUTYCYCLE);
     }
     // MOTORMOVE = false;
   }
-  if ((endTickTime - startTickTime) > debTime) {
-    if (debTime = 1000) debTime = 100;
-    pressedOut = tick_Debouncer(waitForTouchEvent(&raw));
-    startTickTime = endTickTime;
-  }
+}
 
-  /* Calcuate the real X/Y position based on the calibration matrix */
-  calibrateTSPoint(&calibrated, &raw, &_tsMatrix);
+void trackingMove(){
+  if((stState==SENSOR_TRACKING||stState==FIXED_PATH)&& !MOTORMOVE && !MOTORMOVEDELAY){
+    RTC.read(tm);
+    float timeP = getTimeP(tm.Hour,tm.Minute);
+    float solarDeclination = getSolarDec(getJD(tmYearToCalendar(tm.Year),tm.Month,tm.Day));
+    altAngleAim=getAlt(LATITUDE,solarDeclination,timeP);
+    aziAngleAim=getAzi(LATITUDE,solarDeclination,timeP,altAngleAim);
+    magPoll();
+    accelPoll();
+    if(heading<aziAngleAim+baseAngleAzi-4){
+      panelMove(directions = RIGHT_M);
+      panelMoveDelay(directions = RIGHT_M);
+    }else if(heading<aziAngleAim+baseAngleAzi+4){
+      panelMove(directions = LEFT_M);
+      panelMoveDelay(directions = LEFT_M);
+    }else if(angle<altAngleAim+baseAngleAlt-4){
+      panelMove(directions = UP_LA);
+      panelMoveDelay(directions = UP_LA);
+    }else if(angle<altAngleAim+baseAngleAlt+4){
+      panelMove(directions = DOWN_LA);
+      panelMoveDelay(directions = DOWN_LA);
+    }
+    
+    else if(stState==SENSOR_TRACKING/*and ref reads are not 3.3*/){
+    // else if(readLR is greater than 1.24+A){
+    //     panelMove(directions = RIGHT_M);
+    //   panelMoveDelay(directions = RIGHT_M);
+    // }else if(readLR is less than 1.24-A){
+    //   panelMove(directions = LEFT_M);
+    //   panelMoveDelay(directions = LEFT_M);
+    // }else if(readUD is greater than 1.24+A){
+    //   panelMove(directions = UP_LA);
+    //   panelMoveDelay(directions = UP_LA);
+    // }else if(readUD is less than 1.24-A){
+    //   panelMove(directions = DOWN_LA);
+    //   panelMoveDelay(directions = DOWN_LA);
+    // }
+    }
+    
+  }
+}
+
+void fsmTick() {
   if (pressedOut)
     tft.fillCircle(calibrated.x, calibrated.y, 3, RA8875_RED);
 
@@ -307,8 +393,8 @@ void loop() {
 
     case MAIN_MENU:
       displayTime();
-      if(WIFISTAT)writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
-      else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
+      // if(WIFISTAT)writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
+      // else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
       if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
         powerPress = powerPress + 1;
         // Serial.println(powerPress);
@@ -326,22 +412,27 @@ void loop() {
 
       else if (pressedOut) {
         powerPress = 0;
-        if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 107 && calibrated.y < (107 + 85) && pressedOut) {
+
+        if (calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 107 && calibrated.y < (107 + 85) && pressedOut && !MOTORMOVE && !MOTORMOVEDELAY && MANUALMODE) {
+          drawDirectionArrows(0);
           panelMove(directions = UP_LA);
           panelMoveDelay(directions = UP_LA);
           // MOTORMOVE = true;
           pressedOut = false;
-        } else if (MANUALMODE && calibrated.x > 33 && calibrated.x < (33 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
+        } else if (calibrated.x > 33 && calibrated.x < (33 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut && !MOTORMOVE && !MOTORMOVEDELAY && MANUALMODE) {
+          drawDirectionArrows(0);
           panelMove(directions = LEFT_M);
           panelMoveDelay(directions = LEFT_M);
           // MOTORMOVE = true;
           pressedOut = false;
-        } else if (MANUALMODE && calibrated.x > 258 && calibrated.x < (258 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut) {
+        } else if (calibrated.x > 258 && calibrated.x < (258 + 117) && calibrated.y > 223 && calibrated.y < (223 + 85) && pressedOut && !MOTORMOVE && !MOTORMOVEDELAY && MANUALMODE) {
+          drawDirectionArrows(0);
           panelMove(directions = RIGHT_M);
           panelMoveDelay(directions = RIGHT_M);
           // MOTORMOVE = true;
           pressedOut = false;
-        } else if (MANUALMODE && calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 347 && calibrated.y < (347 + 85) && pressedOut) {
+        } else if (calibrated.x > 145 && calibrated.x < (145 + 117) && calibrated.y > 347 && calibrated.y < (347 + 85) && pressedOut && !MOTORMOVE && !MOTORMOVEDELAY && MANUALMODE) {
+          drawDirectionArrows(0);
           panelMove(directions = DOWN_LA);
           panelMoveDelay(directions = DOWN_LA);
           // MOTORMOVE = true;
@@ -432,7 +523,7 @@ void loop() {
       break;
     case WIFI_MENU:
       displayTime();
-      if(WIFISTAT)writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
+      if (WIFISTAT) writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
       else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
       if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
         powerPress = powerPress + 1;
@@ -447,7 +538,7 @@ void loop() {
         }
         pressedOut = false;
       } else if (pressedOut) {
-        powerPress=0;
+        powerPress = 0;
         if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
           // WIFISTAT = false;
           prevState = state;
@@ -458,7 +549,7 @@ void loop() {
           drawStatsIcon(1);
 
           MANUALMODE = true;
-          stState = FIXED_PATH;
+          stState = TRACKING_OFF;
 
           drawAutoIcon(0);
 
@@ -468,7 +559,7 @@ void loop() {
           drawRecordIcon(0);
           drawDirectionArrows(1);
           // delay(500);  //simulate setup
-        }else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut){
+        } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
           Serial.println("connect shits");
           pressedOut = false;
         }
@@ -476,7 +567,11 @@ void loop() {
       break;
     case SENSOR_MENU:
       displayTime();
-      drawSensorTable(statPageCount);
+      
+      if ((endTickTime - startTickTime) > ONESECOND * 3) {
+        drawSensorTable(statPageCount);
+      }
+
       if (calibrated.x > 640 && calibrated.x < 800 && calibrated.y > 65 && calibrated.y < 65 + 70 * 2 && statPageCount > 0 && pressedOut) {
         statPageCount--;
         tft.fillRect(0, 70, 640, 410, RA8875_BLACK);
@@ -508,7 +603,7 @@ void loop() {
       if (tft.touched() && pressedOut) {
         debTime = 1000;
         displayOn();
-        state=prevState;
+        state = prevState;
         prevState = DISPLAY_OFF;
         // delay(1000);
         pressedOut = false;
@@ -589,7 +684,6 @@ void loop() {
   }
 }
 
-
 void panelMoveTracking(int hori, int verti) {}
 
 bool solarTracking() {
@@ -606,8 +700,8 @@ void setUpWifi(bool on) {
   if (on) Serial.println("turn WiFi on");  //set wifi on
   else Serial.println("turn WiFi off");
   ;  //set wifi off
-  bool success =false;
-  WIFISTAT=success;
+  bool success = false;
+  WIFISTAT = success;
 }
 // boolean motorSignalOn = false;
 void panelMove(moveDirection direc) {
@@ -880,7 +974,7 @@ void displayOn() {
 }
 
 void displayTime() {
-  if (RTC.read(tm)) {
+  if (pollClock && RTC.read(tm)) {
     String time = " ";
     time = time + tm.Month;
     time = time + "/";
@@ -894,6 +988,7 @@ void displayTime() {
     char output[50];
     time.toCharArray(output, 50);
     writeTxt(530, 30, output, RA8875_WHITE, 1, 1);
+    pollClock = false;
   }
 }
 
@@ -1040,6 +1135,8 @@ void drawAutoIcon(int on) {
     writeTxt(620, 427, "AUTO(OFF)", RA8875_WHITE, 1, 1);
   }
 }
+
+
 
 int calibrateTSPoint(tsPoint_t *displayPtr, tsPoint_t *screenPtr, tsMatrix_t *matrixPtr) {
   int retValue = 0;
@@ -1319,4 +1416,118 @@ void magPoll() {
   float offsety = 65 + event.magnetic.y;
   float offsetx = 60 + event.magnetic.x;
   heading = ((atan2(offsety, offsetx)) * 180) / Pi;
+}
+
+float getAlt(float lat, float sd, float timeP) {
+  float hourAngle = getHourAngle(timeP);
+  return degrees(asin(cos(radians(lat)) * cos(radians(sd)) * cos(radians(hourAngle)) + sin(radians(lat)) * sin(radians(sd))));
+}
+
+float getAzi(float lat, float sd, float timeP, float alt) {
+  float hourAngle = getHourAngle(timeP);
+  float azi2;
+  if (timeP < 12) {
+    azi2 = (180.0 - degrees(asin(cos(radians(sd)) * sin(radians(hourAngle)) / cos(radians(alt)))));
+  } else {
+    azi2 = (180.0 - degrees(asin(cos(radians(sd)) * sin(radians(hourAngle)) / cos(radians(alt)))) - 360.0);
+  }
+  if (cos(radians(hourAngle)) >= ((tan(radians(sd))) / (tan(radians(lat))))) {
+    return (degrees(asin(cos(radians(sd)) * sin(radians(hourAngle)) / cos(radians(alt)))));
+  } else {
+    return azi2;
+  }
+}
+
+float getHourAngle(float timeInput) {
+  return (12 - timeInput) * 15;
+}
+
+float getSolarDec(float jD) {
+  return 23.45 * sin(radians(360.0 / 365 * (jD - 81)));
+}
+
+float getTimeP(int h, int m) {
+  return (float)h + ((float)m) / 60;
+}
+
+float getJD(int y, int m, int d) {
+  if (y % 400 != 0) {
+    switch (m) {
+      case 1:
+        return d;
+        break;
+      case 2:
+        return 31 + d;
+        break;
+      case 3:
+        return 59 + d;
+        break;
+      case 4:
+        return 90 + d;
+        break;
+      case 5:
+        return 120 + d;
+        break;
+      case 6:
+        return 151 + d;
+        break;
+      case 7:
+        return 181 + d;
+        break;
+      case 8:
+        return 212 + d;
+        break;
+      case 9:
+        return 243 + d;
+        break;
+      case 10:
+        return 273 + d;
+        break;
+      case 11:
+        return 304 + d;
+        break;
+      case 12:
+        return 334 + d;
+        break;
+    }
+  } else {
+    switch (m) {
+      case 1:
+        return d;
+        break;
+      case 2:
+        return 31 + d;
+        break;
+      case 3:
+        return 60 + d;
+        break;
+      case 4:
+        return 91 + d;
+        break;
+      case 5:
+        return 121 + d;
+        break;
+      case 6:
+        return 152 + d;
+        break;
+      case 7:
+        return 182 + d;
+        break;
+      case 8:
+        return 213 + d;
+        break;
+      case 9:
+        return 244 + d;
+        break;
+      case 10:
+        return 274 + d;
+        break;
+      case 11:
+        return 305 + d;
+        break;
+      case 12:
+        return 335 + d;
+        break;
+    }
+  }
 }

@@ -3,6 +3,13 @@
 #include <Adafruit_LSM303_Accel.h>
 #include <Adafruit_LIS2MDL.h>
 
+#include <WiFiNINA.h>
+#include <MySQL_Connection.h>
+#include <MySQL_Cursor.h>
+#include <EthernetClient.h>
+#include <Ethernet.h>
+#include <avr/dtostrf.h>
+
 #include <SPI.h>
 #include <math.h>
 #include "Adafruit_GFX.h"
@@ -20,6 +27,20 @@
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 Adafruit_BME280 bme;
+
+char ssid[] = "pards";
+char pass[] = "";
+
+char user[] = "sql9596235";
+char password[] = "7LCYhZVIwK";
+
+char sqlQuery[] = "INSERT INTO sql9596235.tracked_sensors (temperature, pressure, altitude, humidity) VALUES (";
+char deleteQuery[] = "DELETE FROM sql9596235.tracked_sensors";
+
+WiFiClient client;
+MySQL_Connection conn((Client *)&client);
+
+IPAddress server_addr(52, 5, 226, 201);
 
 // Library only supports hardware SPI at this time
 // Connect SCLK to UNO Digital #13 (Hardware SPI clock)
@@ -41,6 +62,8 @@ Adafruit_BME280 bme;
 #define MOTORDUTYCYCLE 10
 #define LIACDUTYCYCLE 10
 #define GATEDEALY 230
+
+#define WIFISTATUSCYCLE 3000
 
 #define ONESECOND 60000
 
@@ -133,6 +156,7 @@ enum moveDirection {
 } directions;
 
 int startTickTime;
+int startWiFiTime;
 int endTickTime;
 int motorStartTime;
 int motorStartTimeDelay;
@@ -145,6 +169,7 @@ bool pressedOut;
 int debTime = 250;
 bool pollClock = false;
 
+bool displayWiFi = false;
 
 void setup() {
 
@@ -177,7 +202,7 @@ void setup() {
   // accelSetup();
   // magSetup();
 
-  setUpWifi(WIFISTAT);
+  // setUpWifi(WIFISTAT);
   initDebouncer();
 
   pinMode(MOTORLEFT, OUTPUT);
@@ -254,8 +279,8 @@ void setup() {
   startTickTime = millis();
   // magPoll();
   // accelPoll();
-  baseAngleAlt=angle;
-  baseAngleAzi=heading;
+  baseAngleAlt = angle;
+  baseAngleAzi = heading;
   altAngleAim = baseAngleAlt;
   aziAngleAim = baseAngleAzi;
 }
@@ -299,6 +324,10 @@ void loop() {
     pollClock = true;
   }
 
+  if((endTickTime-startWiFiTime)>WIFISTATUSCYCLE){
+    displayWiFi=true;
+    startWiFiTime=millis();
+  }
 
   /* Calcuate the real X/Y position based on the calibration matrix */
   calibrateTSPoint(&calibrated, &raw, &_tsMatrix);
@@ -335,45 +364,44 @@ void motorFlipFlop() {
   }
 }
 
-void trackingMove(){
-  if((stState==SENSOR_TRACKING||stState==FIXED_PATH)&& !MOTORMOVE && !MOTORMOVEDELAY){
+void trackingMove() {
+  if ((stState == SENSOR_TRACKING || stState == FIXED_PATH) && !MOTORMOVE && !MOTORMOVEDELAY) {
     RTC.read(tm);
-    float timeP = getTimeP(tm.Hour,tm.Minute);
-    float solarDeclination = getSolarDec(getJD(tmYearToCalendar(tm.Year),tm.Month,tm.Day));
-    altAngleAim=getAlt(LATITUDE,solarDeclination,timeP);
-    aziAngleAim=getAzi(LATITUDE,solarDeclination,timeP,altAngleAim);
+    float timeP = getTimeP(tm.Hour, tm.Minute);
+    float solarDeclination = getSolarDec(getJD(tmYearToCalendar(tm.Year), tm.Month, tm.Day));
+    altAngleAim = getAlt(LATITUDE, solarDeclination, timeP);
+    aziAngleAim = getAzi(LATITUDE, solarDeclination, timeP, altAngleAim);
     magPoll();
     accelPoll();
-    if(heading<aziAngleAim+baseAngleAzi-4){
+    if (heading < aziAngleAim + baseAngleAzi - 4) {
       panelMove(directions = RIGHT_M);
       panelMoveDelay(directions = RIGHT_M);
-    }else if(heading<aziAngleAim+baseAngleAzi+4){
+    } else if (heading < aziAngleAim + baseAngleAzi + 4) {
       panelMove(directions = LEFT_M);
       panelMoveDelay(directions = LEFT_M);
-    }else if(angle<altAngleAim+baseAngleAlt-4){
+    } else if (angle < altAngleAim + baseAngleAlt - 4) {
       panelMove(directions = UP_LA);
       panelMoveDelay(directions = UP_LA);
-    }else if(angle<altAngleAim+baseAngleAlt+4){
+    } else if (angle < altAngleAim + baseAngleAlt + 4) {
       panelMove(directions = DOWN_LA);
       panelMoveDelay(directions = DOWN_LA);
     }
-    
-    else if(stState==SENSOR_TRACKING/*and ref reads are not 3.3*/){
-    // else if(readLR is greater than 1.24+A){
-    //     panelMove(directions = RIGHT_M);
-    //   panelMoveDelay(directions = RIGHT_M);
-    // }else if(readLR is less than 1.24-A){
-    //   panelMove(directions = LEFT_M);
-    //   panelMoveDelay(directions = LEFT_M);
-    // }else if(readUD is greater than 1.24+A){
-    //   panelMove(directions = UP_LA);
-    //   panelMoveDelay(directions = UP_LA);
-    // }else if(readUD is less than 1.24-A){
-    //   panelMove(directions = DOWN_LA);
-    //   panelMoveDelay(directions = DOWN_LA);
-    // }
+
+    else if (stState == SENSOR_TRACKING /*and ref reads are not 3.3*/) {
+      // else if(readLR is greater than 1.24+A){
+      //     panelMove(directions = RIGHT_M);
+      //   panelMoveDelay(directions = RIGHT_M);
+      // }else if(readLR is less than 1.24-A){
+      //   panelMove(directions = LEFT_M);
+      //   panelMoveDelay(directions = LEFT_M);
+      // }else if(readUD is greater than 1.24+A){
+      //   panelMove(directions = UP_LA);
+      //   panelMoveDelay(directions = UP_LA);
+      // }else if(readUD is less than 1.24-A){
+      //   panelMove(directions = DOWN_LA);
+      //   panelMoveDelay(directions = DOWN_LA);
+      // }
     }
-    
   }
 }
 
@@ -388,11 +416,18 @@ void fsmTick() {
         state = MAIN_MENU;
 
         drawMainMenu();
+        wifiStatus();
+        startWiFiTime=millis();
       }
       break;
 
     case MAIN_MENU:
       displayTime();
+      if(displayWiFi){
+        wifiStatus();
+        displayWiFi=false;
+      }
+      
       // if(WIFISTAT)writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
       // else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
       if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
@@ -454,7 +489,7 @@ void fsmTick() {
           drawRecordMenu();
           pressedOut = false;
         } else if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
-          // WIFISTAT = true;
+
           prevState = state;
           state = WIFI_MENU;
           drawWiFiIcon(1);
@@ -471,7 +506,7 @@ void fsmTick() {
           writeTxt(0, 101, "Server overwrite,", RA8875_WHITE, 2, 0);
           writeTxt(0, 150, "press WiFi to", RA8875_WHITE, 2, 0);
           writeTxt(0, 200, "cancel.", RA8875_WHITE, 2, 0);
-          setUpWifi(true);
+          // setUpWifi(true);
           // delay(500);  //simulate setup
         } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 340 && calibrated.y < (340 + 85) && pressedOut) {
           switch (stState) {
@@ -543,7 +578,7 @@ void fsmTick() {
           // WIFISTAT = false;
           prevState = state;
           state = MAIN_MENU;
-          setUpWifi(false);
+          // setUpWifi(false);
           drawWiFiIcon(0);
           drawRstIcon(0, 1);
           drawStatsIcon(1);
@@ -560,14 +595,16 @@ void fsmTick() {
           drawDirectionArrows(1);
           // delay(500);  //simulate setup
         } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
-          Serial.println("connect shits");
+          WIFISTAT = wifiConnect();
+          Serial.println(WIFISTAT);
+          if (WIFISTAT) writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
           pressedOut = false;
         }
       }
       break;
     case SENSOR_MENU:
       displayTime();
-      
+
       if ((endTickTime - startTickTime) > ONESECOND * 3) {
         drawSensorTable(statPageCount);
       }
@@ -576,6 +613,7 @@ void fsmTick() {
         statPageCount--;
         tft.fillRect(0, 70, 640, 410, RA8875_BLACK);
         for (int i = 1; i < 6; i++) { tft.fillRect(0, 65 + 70 * i, 640, 5, RA8875_WHITE); }
+        drawSensorTable(statPageCount);
         // delay(100);
         pressedOut = false;
       } else if (calibrated.x > 640 && calibrated.x < 800 && calibrated.y > 65 + 70 * 2 && calibrated.y < 65 + 70 * 4 && statPageCount < 2 && pressedOut) {
@@ -583,6 +621,7 @@ void fsmTick() {
         tft.fillRect(0, 70, 640, 410, RA8875_BLACK);
         for (int i = 1; i < 6; i++) { tft.fillRect(0, 65 + 70 * i, 640, 5, RA8875_WHITE); }
         // delay(100);
+        drawSensorTable(statPageCount);
         pressedOut = false;
       } else if (calibrated.x > 640 && calibrated.x < 800 && calibrated.y > 65 + 70 * 4 && calibrated.y < 800 && pressedOut) {
         prevState = state;
@@ -696,13 +735,7 @@ bool selfCheck() {
   return voltage == 5;
 }
 
-void setUpWifi(bool on) {
-  if (on) Serial.println("turn WiFi on");  //set wifi on
-  else Serial.println("turn WiFi off");
-  ;  //set wifi off
-  bool success = false;
-  WIFISTAT = success;
-}
+
 // boolean motorSignalOn = false;
 void panelMove(moveDirection direc) {
   if (MOTORMOVE == false) {
@@ -1529,5 +1562,88 @@ float getJD(int y, int m, int d) {
         return 335 + d;
         break;
     }
+  }
+}
+
+void wifiStatus(){
+  int status = WiFi.status();
+  if(status ==WL_CONNECTED){
+    writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
+  }else{
+    writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
+  }
+}
+
+bool wifiConnect() {
+  int wifiStartTime = millis();
+  writeTxt(0, 250, "Connecting  ", RA8875_WHITE, 2, 1);
+  int status = WiFi.begin(ssid, pass);  //attempt to establish a WiFi connection at the given network
+
+  if (status != WL_CONNECTED) {
+
+    Serial.println("Couldn't get a wifi connection");  //Tell the user that the system could not establish a connection
+    while (true) {
+      if (millis() - wifiStartTime > 5000) {
+        WiFi.end();
+        writeTxt(0, 250, "Connect fail", RA8875_WHITE, 2, 1);
+        return false;
+      }
+    }  //loop until a connection is established
+
+  }
+
+  else {
+
+    Serial.println("Connected to network");  //Tell user the system was able to connect to the internet
+    IPAddress ip = WiFi.localIP();           //Retrieve the ip address of the system
+    Serial.print("My IP address is: ");      //Print out the ip address to the serial monitor
+    Serial.println(ip);                      //Print out the ip address to the serial monitor
+    writeTxt(0, 250, "Connect done", RA8875_WHITE, 2, 1);
+    return true;
+  }
+  return false;
+}
+
+void wifiCloseConnection() {
+
+  WiFi.end();
+}
+
+void pushSensorData(float enviornment_temp, float enviornment_pressure, float enviornment_humidity, float enviornment_altitude) {
+
+  char temperature[8];
+  char pressure[8];
+  char altitude[8];
+  char humidity[8];
+
+  dtostrf(enviornment_temp, 6, 2, temperature);
+  dtostrf(enviornment_pressure, 6, 2, pressure);
+  dtostrf(enviornment_altitude, 6, 2, altitude);
+  dtostrf(enviornment_humidity, 6, 2, humidity);
+
+  strcat(sqlQuery, temperature);
+  strcat(sqlQuery, ",");
+  strcat(sqlQuery, pressure);
+  strcat(sqlQuery, ",");
+  strcat(sqlQuery, altitude);
+  strcat(sqlQuery, ",");
+  strcat(sqlQuery, humidity);
+  strcat(sqlQuery, ")");
+
+  Serial.println("Connecting to Database...");
+
+  if (conn.connect(server_addr, 3306, user, password)) {  //if the connection to the database at the specified location is true...
+
+    delay(1000);                                      //delay for 1 second                         //print statement to check if it made it to this part of the loop
+    MySQL_Cursor *cur_mem = new MySQL_Cursor(&conn);  //Create a mySQL cursor that will be used to access the database
+    cur_mem->execute(deleteQuery);
+    cur_mem->execute(sqlQuery);  //point the cursor to execute the specified query
+    delete cur_mem;              //delete cursor for memory purposes
+
+  }
+
+  else {
+
+    Serial.println("Database connection failed.");  //connection has failed if it reaches this else statement
   }
 }

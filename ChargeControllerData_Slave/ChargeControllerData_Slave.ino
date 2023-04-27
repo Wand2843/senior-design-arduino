@@ -18,6 +18,8 @@ https://github.com/wrybread/ESP32ArduinoRenogy
 
 // https://github.com/syvic/ModbusMaster
 #include <ModbusMaster.h>
+#include <Wire.h>
+
 ModbusMaster node;
 
 
@@ -359,15 +361,15 @@ void renogy_control_load(bool state) {
 }
 
 void requestEvent() {
-  Wire.write(battery_soc);
-  Wire.write((byte*)&battery_voltage, sizeof(float));
-  Wire.write((byte*)&battery_charging_amps, sizeof(float));
-  Wire.write(battery_temperature);
-  Wire.write(controller_temperature);
-  Wire.write((byte*)&load_voltage, sizeof(float));
-  Wire.write((byte*)&load_amps, sizeof(float));
-  Wire.write(load_watts);
-  Wire.write((byte*)&solar_panel_voltage, sizeof(float));
-  Wire.write((byte*)&solar_panel_amps, sizeof(float));
-  Wire.write(solar_panel_watts);
+  Wire.write(renogy_data.battery_soc);
+  Wire.write((byte*)&renogy_data.battery_voltage, sizeof(float));
+  Wire.write((byte*)&renogy_data.battery_charging_amps, sizeof(float));
+  Wire.write(renogy_data.battery_temperature);
+  Wire.write(renogy_data.controller_temperature);
+  Wire.write((byte*)&renogy_data.load_voltage, sizeof(float));
+  Wire.write((byte*)&renogy_data.load_amps, sizeof(float));
+  Wire.write(renogy_data.load_watts);
+  Wire.write((byte*)&renogy_data.solar_panel_voltage, sizeof(float));
+  Wire.write((byte*)&renogy_data.solar_panel_amps, sizeof(float));
+  Wire.write(renogy_data.solar_panel_watts);
 }

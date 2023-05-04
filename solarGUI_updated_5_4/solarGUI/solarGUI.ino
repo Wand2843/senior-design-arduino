@@ -62,7 +62,7 @@ IPAddress server_addr(52, 5, 226, 201);
 #define LADOWNDELAY 7
 
 #define MOTORDUTYCYCLE 5
-#define LIACDUTYCYCLE 20
+#define LIACDUTYCYCLE 10
 #define GATEDEALY 230
 
 #define WIFISTATUSCYCLE 3000

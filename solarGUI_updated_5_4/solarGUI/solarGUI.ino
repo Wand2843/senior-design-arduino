@@ -52,9 +52,9 @@ IPAddress server_addr(52, 5, 226, 201);
 #define RA8875_CS 10
 #define RA8875_RESET 9
 
-#define MOTORLEFT 14
+#define MOTORLEFT 1
 #define MOTORLDELAY 2
-#define MOTORRIGHT 15
+#define MOTORRIGHT 0
 #define MOTORRDELAY 3
 #define LAUP 4
 #define LADOWN 5

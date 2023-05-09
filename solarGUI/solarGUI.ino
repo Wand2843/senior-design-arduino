@@ -1,9 +1,10 @@
+#include <Arduino.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <Adafruit_LSM303_Accel.h>
-#include <Adafruit_LIS2MDL.h>
+#include <Adafruit_LIS3MDL.h>
 
-#include <WiFiNINA.h>
+#include <WiFi.h>
 #include <MySQL_Connection.h>
 #include <MySQL_Cursor.h>
 #include <EthernetClient.h>
@@ -14,31 +15,32 @@
 #include <math.h>
 #include "Adafruit_GFX.h"
 #include "Adafruit_RA8875.h"
-#if defined(EEPROM_SUPPORTED)
-#include <EEPROM.h>
-#endif
 #include "debouncer.h"
 
 #include <Wire.h>
 #include <TimeLib.h>
 #include <DS1307RTC.h>
 
-#include <WiFiNINA.h>
+// #include <WiFiNINA.h>
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 Adafruit_BME280 bme;
 
-char ssid[] = "pards";
-char pass[] = "";
+IPAddress servaddress(52, 5, 226, 201);
+
+char ssid[] = "iPhone (3)";
+char pass[] = "Minusone123!";
 
 char user[] = "sql9596235";
 char password[] = "7LCYhZVIwK";
 
 char sqlQuery[] = "INSERT INTO sql9596235.tracked_sensors (temperature, pressure, altitude, humidity) VALUES (";
 char deleteQuery[] = "DELETE FROM sql9596235.tracked_sensors";
+char selectQuery[] = "SELECT * FROM sql9596235.control";
 
 WiFiClient client;
 MySQL_Connection conn((Client *)&client);
+// bool dataBaseOnline;
 
 IPAddress server_addr(52, 5, 226, 201);
 
@@ -50,22 +52,23 @@ IPAddress server_addr(52, 5, 226, 201);
 #define RA8875_CS 10
 #define RA8875_RESET 9
 
-#define MOTORLEFT 0
+#define MOTORLEFT 1
 #define MOTORLDELAY 2
-#define MOTORRIGHT 1
+#define MOTORRIGHT 0
 #define MOTORRDELAY 3
 #define LAUP 4
 #define LADOWN 5
 #define LAUPDELAY 6
 #define LADOWNDELAY 7
 
-#define MOTORDUTYCYCLE 10
-#define LIACDUTYCYCLE 10
-#define GATEDEALY 230
+#define MOTORDUTYCYCLE 50
+#define LIACDUTYCYCLE 200
+#define GATEDEALY 400
 
 #define WIFISTATUSCYCLE 3000
 
 #define ONESECOND 60000
+#define TRACKINGPERIOD 1000
 
 #define LATITUDE 40
 
@@ -94,10 +97,14 @@ float enviornment_pressure;  //hPa
 float enviornment_humidity;  //%
 float enviornment_altitude;  //m
 
+int manual;
+int schedule;
+int automatic;
+
 Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(54321);
 float angle;
 
-Adafruit_LIS2MDL mag = Adafruit_LIS2MDL(12345);
+Adafruit_LIS3MDL lis3mdl;
 float heading;
 
 float baseAngleAzi;
@@ -108,10 +115,10 @@ float aziAngleAim = 0;
 
 bool WIFISTAT;
 bool MANUALMODE;
-bool PHOTOTRACKING;
+// bool PHOTOTRACKING;
 bool MOTORMOVE;
 bool MOTORMOVEDELAY;
-bool LIACMOVE;
+bool TRACKINGON;
 
 int motorCount;
 int laCount;
@@ -156,7 +163,11 @@ enum moveDirection {
 } directions;
 
 int startTickTime;
+int startSensorTime;
 int startWiFiTime;
+int startClockTime;
+int startPDTime;
+int startTrackingTime;
 int endTickTime;
 int motorStartTime;
 int motorStartTimeDelay;
@@ -173,7 +184,8 @@ bool displayWiFi = false;
 
 void setup() {
 
-
+  Serial.begin(9600);
+  Serial.println("RA8875 start");
   pollClock = false;
 
   powerPress = 0;
@@ -181,26 +193,26 @@ void setup() {
   laCount = 0;
   WIFISTAT = false;
   MANUALMODE = true;
-  PHOTOTRACKING = false;
+  // PHOTOTRACKING = false;
   MOTORMOVE = false;
   MOTORMOVEDELAY = false;
-  LIACMOVE = false;
+  TRACKINGON = false;
   stState = TRACKING_OFF;
   state = SELF_CHECK;
   prevState = state;
-  unsigned status;
-  // status = bme.begin();
-  // if (!status) {
-  //   Serial.println("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
-  //   Serial.print("SensorID was: 0x");
-  //   Serial.println(bme.sensorID(), 16);
-  //   Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n");
-  //   Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
-  //   Serial.print("        ID of 0x60 represents a BME 280.\n");
-  //   Serial.print("        ID of 0x61 represents a BME 680.\n");
-  // }
-  // accelSetup();
-  // magSetup();
+  unsigned BMEstatus;
+  BMEstatus = bme.begin();
+  if (!BMEstatus) {
+    Serial.println("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
+    Serial.print("SensorID was: 0x");
+    Serial.println(bme.sensorID(), 16);
+    Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n");
+    Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
+    Serial.print("        ID of 0x60 represents a BME 280.\n");
+    Serial.print("        ID of 0x61 represents a BME 680.\n");
+  }
+  accelSetup();
+  magSetup();
 
   // setUpWifi(WIFISTAT);
   initDebouncer();
@@ -230,8 +242,7 @@ void setup() {
   digitalWrite(LAUPDELAY, LOW);
 
 
-  Serial.begin(9600);
-  Serial.println("RA8875 start");
+
 
   /* Initialize the display using 'RA8875_480x80', 'RA8875_480x128', 'RA8875_480x272' or 'RA8875_800x480' */
   if (!tft.begin(RA8875_800x480)) {
@@ -277,10 +288,14 @@ void setup() {
   //delay(5000);
   //screenOff();
   startTickTime = millis();
+  startClockTime = millis();
+  startPDTime = millis();
+  startSensorTime = millis();
+  startTrackingTime = millis();
   // magPoll();
   // accelPoll();
-  baseAngleAlt = angle;
-  baseAngleAzi = heading;
+  baseAngleAlt = 0;
+  baseAngleAzi = 0;
   altAngleAim = baseAngleAlt;
   aziAngleAim = baseAngleAzi;
 }
@@ -288,6 +303,7 @@ void setup() {
 
 
 void loop() {
+  // Serial.println("RA8875 start");
   // int sensorValue = analogRead(A7);
   // float voltage= sensorValue * (5.0 / 1023.0);
   // Serial.println(voltage);
@@ -314,19 +330,26 @@ void loop() {
   endTickTime = millis();
   motorFlipFlop();
   trackingMove();
+  sendDataFSM();
   if ((endTickTime - startTickTime) > debTime) {
     if (debTime = 1000) debTime = 100;
     pressedOut = tick_Debouncer(waitForTouchEvent(&raw));
     startTickTime = endTickTime;
   }
 
-  if ((endTickTime - startTickTime) > ONESECOND) {
-    pollClock = true;
+  if ((endTickTime - startTrackingTime) > TRACKINGPERIOD) {
+    TRACKINGON = true;
+    startTrackingTime = endTickTime;
   }
 
-  if((endTickTime-startWiFiTime)>WIFISTATUSCYCLE){
-    displayWiFi=true;
-    startWiFiTime=millis();
+  if ((endTickTime - startClockTime) > ONESECOND) {
+    pollClock = true;
+    startClockTime = endTickTime;
+  }
+
+  if ((endTickTime - startWiFiTime) > WIFISTATUSCYCLE) {
+    displayWiFi = true;
+    startWiFiTime = millis();
   }
 
   /* Calcuate the real X/Y position based on the calibration matrix */
@@ -365,42 +388,48 @@ void motorFlipFlop() {
 }
 
 void trackingMove() {
-  if ((stState == SENSOR_TRACKING || stState == FIXED_PATH) && !MOTORMOVE && !MOTORMOVEDELAY) {
-    RTC.read(tm);
-    float timeP = getTimeP(tm.Hour, tm.Minute);
-    float solarDeclination = getSolarDec(getJD(tmYearToCalendar(tm.Year), tm.Month, tm.Day));
-    altAngleAim = getAlt(LATITUDE, solarDeclination, timeP);
-    aziAngleAim = getAzi(LATITUDE, solarDeclination, timeP, altAngleAim);
-    magPoll();
-    accelPoll();
-    if (heading < aziAngleAim + baseAngleAzi - 4) {
-      panelMove(directions = RIGHT_M);
-      panelMoveDelay(directions = RIGHT_M);
-    } else if (heading < aziAngleAim + baseAngleAzi + 4) {
-      panelMove(directions = LEFT_M);
-      panelMoveDelay(directions = LEFT_M);
-    } else if (angle < altAngleAim + baseAngleAlt - 4) {
-      panelMove(directions = UP_LA);
-      panelMoveDelay(directions = UP_LA);
-    } else if (angle < altAngleAim + baseAngleAlt + 4) {
-      panelMove(directions = DOWN_LA);
-      panelMoveDelay(directions = DOWN_LA);
-    }
-
-    else if (stState == SENSOR_TRACKING /*and ref reads are not 3.3*/) {
-      // else if(readLR is greater than 1.24+A){
-      //     panelMove(directions = RIGHT_M);
-      //   panelMoveDelay(directions = RIGHT_M);
-      // }else if(readLR is less than 1.24-A){
-      //   panelMove(directions = LEFT_M);
-      //   panelMoveDelay(directions = LEFT_M);
-      // }else if(readUD is greater than 1.24+A){
-      //   panelMove(directions = UP_LA);
-      //   panelMoveDelay(directions = UP_LA);
-      // }else if(readUD is less than 1.24-A){
-      //   panelMove(directions = DOWN_LA);
-      //   panelMoveDelay(directions = DOWN_LA);
-      // }
+  if (TRACKINGON) {
+    if ((stState == SENSOR_TRACKING || stState == FIXED_PATH) && !MOTORMOVE && !MOTORMOVEDELAY) {
+      RTC.read(tm);
+      float timeP = getTimeP(tm.Hour, tm.Minute);
+      float solarDeclination = getSolarDec(getJD(tmYearToCalendar(tm.Year), tm.Month, tm.Day));
+      altAngleAim = getAlt(LATITUDE, solarDeclination, timeP);
+      aziAngleAim = getAzi(LATITUDE, solarDeclination, timeP, altAngleAim);
+      magPoll();
+      accelPoll();
+      Serial.println(altAngleAim);
+      Serial.println(aziAngleAim);
+      Serial.println(90 + angle);
+      Serial.println(180 - heading);
+      if (180 - heading < aziAngleAim + baseAngleAzi - 2) {
+        panelMove(directions = LEFT_M);
+        panelMoveDelay(directions = LEFT_M);
+      } else if (180 - heading > aziAngleAim + baseAngleAzi + 2) {
+        panelMove(directions = RIGHT_M);
+        panelMoveDelay(directions = RIGHT_M);
+      } else if (angle + 90 < altAngleAim + baseAngleAlt - 2) {
+        panelMove(directions = UP_LA);
+        panelMoveDelay(directions = UP_LA);
+      } else if (angle + 90 > altAngleAim + baseAngleAlt + 2) {
+        panelMove(directions = DOWN_LA);
+        panelMoveDelay(directions = DOWN_LA);
+      } else if (stState == SENSOR_TRACKING /*and ref reads are not 3.3*/) {
+        // else if(readLR is greater than 1.24+A){
+        //     panelMove(directions = RIGHT_M);
+        //   panelMoveDelay(directions = RIGHT_M);
+        // }else if(readLR is less than 1.24-A){
+        //   panelMove(directions = LEFT_M);
+        //   panelMoveDelay(directions = LEFT_M);
+        // }else if(readUD is greater than 1.24+A){
+        //   panelMove(directions = UP_LA);
+        //   panelMoveDelay(directions = UP_LA);
+        // }else if(readUD is less than 1.24-A){
+        //   panelMove(directions = DOWN_LA);
+        //   panelMoveDelay(directions = DOWN_LA);
+        // }
+      } else {
+        TRACKINGON = false;
+      }
     }
   }
 }
@@ -417,17 +446,22 @@ void fsmTick() {
 
         drawMainMenu();
         wifiStatus();
-        startWiFiTime=millis();
+        startWiFiTime = millis();
       }
       break;
 
     case MAIN_MENU:
       displayTime();
-      if(displayWiFi){
+
+
+
+      //CCData();
+      //Serial.println(battery_voltage);
+      if (displayWiFi) {
         wifiStatus();
-        displayWiFi=false;
+        displayWiFi = false;
       }
-      
+
       // if(WIFISTAT)writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
       // else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
       if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
@@ -558,8 +592,8 @@ void fsmTick() {
       break;
     case WIFI_MENU:
       displayTime();
-      if (WIFISTAT) writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
-      else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
+      if (WIFISTAT) writeTxt(160, 17, "Server Online ", RA8875_WHITE, 2, 1);
+      else writeTxt(160, 17, "Server Offline", RA8875_WHITE, 2, 1);
       if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
         powerPress = powerPress + 1;
         // Serial.println(powerPress);
@@ -597,7 +631,7 @@ void fsmTick() {
         } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 210 && calibrated.y < (210 + 85) && pressedOut) {
           WIFISTAT = wifiConnect();
           Serial.println(WIFISTAT);
-          if (WIFISTAT) writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
+          if (WIFISTAT) writeTxt(160, 17, "Server Online ", RA8875_WHITE, 2, 1);
           pressedOut = false;
         }
       }
@@ -605,8 +639,9 @@ void fsmTick() {
     case SENSOR_MENU:
       displayTime();
 
-      if ((endTickTime - startTickTime) > ONESECOND * 3) {
+      if ((endTickTime - startSensorTime) > 3000) {
         drawSensorTable(statPageCount);
+        startSensorTime = endTickTime;
       }
 
       if (calibrated.x > 640 && calibrated.x < 800 && calibrated.y > 65 && calibrated.y < 65 + 70 * 2 && statPageCount > 0 && pressedOut) {
@@ -866,6 +901,7 @@ void panelMoveDelay(moveDirection direc) {
 
         break;
     }
+    delay(100);
   }
 }
 
@@ -877,8 +913,7 @@ void drawMainMenu() {
   writeTxt(0, 0, "TEST", RA8875_BLACK, 3, 0);
 
   drawDirectionArrows(1);
-
-
+  pollClock = true;
   displayTime();
   drawPowerIcon();
   drawStatsIcon(1);
@@ -928,20 +963,106 @@ void drawSensorList(int page) {
 
 void drawSensorTable(int page) {
   if (page == 0) {
-    writeTxt(0, 80, "Pressure: Oxygen? No need!", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70, "Wind: Tornado!", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 2, "Humidity: Draining", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 3, "Temperature: 100 C", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 4, "Battery: 10Ah", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 5, "Battery Voltage: 12V", RA8875_WHITE, 1, 1);
+
+
+    bmeData();
+
+    char myTemperature[8];
+    char myPressure[8];
+    char myAltitude[8];
+    char myHumidity[8];
+
+    char myBatteryPercentage[8];
+    char myBatteryVoltage[8];
+
+
+    float battery_percentage_float;
+
+    battery_percentage_float = battery_soc;
+
+    dtostrf(enviornment_temp, 6, 2, myTemperature);
+    dtostrf(enviornment_pressure, 6, 2, myPressure);
+    dtostrf(enviornment_altitude, 6, 2, myAltitude);
+    dtostrf(enviornment_humidity, 6, 2, myHumidity);
+
+    dtostrf(battery_percentage_float, 6, 2, myBatteryPercentage);
+    dtostrf(battery_voltage, 6, 2, myBatteryVoltage);
+
+    String env_temp = "Environment Temperature:" + String(myTemperature) + " Degrees F";
+    String env_pressure = "Environment Pressure:" + String(myPressure) + " inches/hg";
+    String env_altitude = "Environment Altitude: " + String(myAltitude) + " m";
+    String env_humidity = "Environment Humidity:" + String(myHumidity) + " %";
+
+    String battery_percentage_string = "Battery Percentage:" + String(myBatteryPercentage) + " %";
+    String battery_voltage_string = "Battery Voltage:" + String(myBatteryVoltage) + " V";
+
+    char charTempArray[50];
+    char charPressureArray[50];
+    char charAltitudeArray[50];
+    char charHumidityArray[50];
+
+    char charBatteryPercentageArray[50];
+    char charBatteryVoltageArray[50];
+
+    env_temp.toCharArray(charTempArray, 50);
+    env_pressure.toCharArray(charPressureArray, 50);
+    env_altitude.toCharArray(charAltitudeArray, 50);
+    env_humidity.toCharArray(charHumidityArray, 50);
+
+    battery_percentage_string.toCharArray(charBatteryPercentageArray, 50);
+    battery_voltage_string.toCharArray(charBatteryVoltageArray, 50);
+
+    writeTxt(0, 80, charTempArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70, charPressureArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 2, charAltitudeArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 3, charHumidityArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 4, charBatteryPercentageArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 5, charBatteryVoltageArray, RA8875_WHITE, 1, 1);
+
+    CCData();
+
   } else if (page == 1) {
-    writeTxt(0, 80, "Outlet Current: 200A", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 1, "Outlet Voltage: 110V", RA8875_WHITE, 1, 1);
+
+    /*
+uint8_t battery_temperature;     // celcius
+uint8_t controller_temperature;  // celcius
+float load_voltage;              // volts
+float load_amps;                 // amps
+uint8_t load_watts;              // watts
+float solar_panel_voltage;       // volts
+float solar_panel_amps;          // amps
+uint8_t solar_panel_watts;       // watts
+*/
+
+    bmeData();
+
+    char myBatteryChargingAmps[8];
+    char myBatteryTemperature[8];
+
+    dtostrf(battery_charging_amps, 6, 2, myBatteryChargingAmps);
+    dtostrf(battery_temperature, 6, 2, myBatteryTemperature);
+
+    String battery_charging_amps_string = "Battery Amps:" + String(myBatteryChargingAmps) + " A";
+    String battery_temperature_string = "Battery Temperature:" + String(myBatteryTemperature) + " Degrees C";
+
+    char charBatteryChargingAmpsArray[50];
+    char charBatteryTemperatureArray[50];
+
+    battery_charging_amps_string.toCharArray(charBatteryChargingAmpsArray, 50);
+    battery_temperature_string.toCharArray(charBatteryTemperatureArray, 50);
+
+
+    writeTxt(0, 80, charBatteryChargingAmpsArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 1, charBatteryTemperatureArray, RA8875_WHITE, 1, 1);
     writeTxt(0, 80 + 70 * 2, "Charging Current: 0A", RA8875_WHITE, 1, 1);
     writeTxt(0, 80 + 70 * 3, "How long did this take?", RA8875_WHITE, 1, 1);
     writeTxt(0, 80 + 70 * 4, "One night", RA8875_WHITE, 1, 1);
     writeTxt(0, 80 + 70 * 5, "When did I start? Sunday 12 AM", RA8875_WHITE, 1, 1);
+
+    CCData();
+
   } else if (page == 2) {
+
     writeTxt(0, 80, "Did I sleep? ", RA8875_WHITE, 1, 1);
     writeTxt(0, 80 + 70 * 1, "No!", RA8875_WHITE, 1, 1);
   }
@@ -1374,10 +1495,10 @@ void CCData() {
 }
 
 void bmeData() {
-  enviornment_temp = bme.readTemperature();
-  enviornment_pressure = (bme.readPressure() / 100.0F);
-  enviornment_humidity = bme.readAltitude(SEALEVELPRESSURE_HPA);
-  enviornment_altitude = bme.readHumidity();
+  enviornment_temp = ((bme.readTemperature() * 1.8) + 32);
+  enviornment_pressure = (bme.readPressure() / 100.0F) * 0.030;
+  enviornment_altitude = bme.readAltitude(SEALEVELPRESSURE_HPA);
+  enviornment_humidity = bme.readHumidity();
 }
 
 void accelSetup() {
@@ -1431,24 +1552,80 @@ void accelPoll() {
 }
 
 void magSetup() {
-  if (!mag.begin()) {
-    /* There wasa problem detecting the LIS2MDL ... check your connections */
-    Serial.println("Ooops, no LIS2MDL detected ... Check your wiring!");
-    while (1)
-      ;
+  Serial.println("Adafruit LIS3MDL test!");
+
+  // Try to initialize!
+  if (!lis3mdl.begin_I2C()) {  // hardware I2C mode, can pass in address & alt Wire
+                               //if (! lis3mdl.begin_SPI(LIS3MDL_CS)) {  // hardware SPI mode
+                               //if (! lis3mdl.begin_SPI(LIS3MDL_CS, LIS3MDL_CLK, LIS3MDL_MISO, LIS3MDL_MOSI)) { // soft SPI
+    Serial.println("Failed to find LIS3MDL chip");
+    while (1) { delay(10); }
   }
+  Serial.println("LIS3MDL Found!");
+
+  lis3mdl.setPerformanceMode(LIS3MDL_MEDIUMMODE);
+  Serial.print("Performance mode set to: ");
+  switch (lis3mdl.getPerformanceMode()) {
+    case LIS3MDL_LOWPOWERMODE: Serial.println("Low"); break;
+    case LIS3MDL_MEDIUMMODE: Serial.println("Medium"); break;
+    case LIS3MDL_HIGHMODE: Serial.println("High"); break;
+    case LIS3MDL_ULTRAHIGHMODE: Serial.println("Ultra-High"); break;
+  }
+
+  lis3mdl.setOperationMode(LIS3MDL_CONTINUOUSMODE);
+  Serial.print("Operation mode set to: ");
+  // Single shot mode will complete conversion and go into power down
+  switch (lis3mdl.getOperationMode()) {
+    case LIS3MDL_CONTINUOUSMODE: Serial.println("Continuous"); break;
+    case LIS3MDL_SINGLEMODE: Serial.println("Single mode"); break;
+    case LIS3MDL_POWERDOWNMODE: Serial.println("Power-down"); break;
+  }
+
+  lis3mdl.setDataRate(LIS3MDL_DATARATE_155_HZ);
+  // You can check the datarate by looking at the frequency of the DRDY pin
+  Serial.print("Data rate set to: ");
+  switch (lis3mdl.getDataRate()) {
+    case LIS3MDL_DATARATE_0_625_HZ: Serial.println("0.625 Hz"); break;
+    case LIS3MDL_DATARATE_1_25_HZ: Serial.println("1.25 Hz"); break;
+    case LIS3MDL_DATARATE_2_5_HZ: Serial.println("2.5 Hz"); break;
+    case LIS3MDL_DATARATE_5_HZ: Serial.println("5 Hz"); break;
+    case LIS3MDL_DATARATE_10_HZ: Serial.println("10 Hz"); break;
+    case LIS3MDL_DATARATE_20_HZ: Serial.println("20 Hz"); break;
+    case LIS3MDL_DATARATE_40_HZ: Serial.println("40 Hz"); break;
+    case LIS3MDL_DATARATE_80_HZ: Serial.println("80 Hz"); break;
+    case LIS3MDL_DATARATE_155_HZ: Serial.println("155 Hz"); break;
+    case LIS3MDL_DATARATE_300_HZ: Serial.println("300 Hz"); break;
+    case LIS3MDL_DATARATE_560_HZ: Serial.println("560 Hz"); break;
+    case LIS3MDL_DATARATE_1000_HZ: Serial.println("1000 Hz"); break;
+  }
+
+  lis3mdl.setRange(LIS3MDL_RANGE_4_GAUSS);
+  Serial.print("Range set to: ");
+  switch (lis3mdl.getRange()) {
+    case LIS3MDL_RANGE_4_GAUSS: Serial.println("+-4 gauss"); break;
+    case LIS3MDL_RANGE_8_GAUSS: Serial.println("+-8 gauss"); break;
+    case LIS3MDL_RANGE_12_GAUSS: Serial.println("+-12 gauss"); break;
+    case LIS3MDL_RANGE_16_GAUSS: Serial.println("+-16 gauss"); break;
+  }
+
+  lis3mdl.setIntThreshold(500);
+  lis3mdl.configInterrupt(false, false, true,  // enable z axis
+                          true,                // polarity
+                          false,               // don't latch
+                          true);               // enabled!
 }
 
 void magPoll() {
+  lis3mdl.read();  // get X Y and Z data at once
   sensors_event_t event;
-  mag.getEvent(&event);
-
+  lis3mdl.getEvent(&event);
   float Pi = 3.14159;
-
-  // Calculate the angle of the vector y,x
-  float offsety = 65 + event.magnetic.y;
-  float offsetx = 60 + event.magnetic.x;
+  float offsety = -22 + event.magnetic.y;
+  float offsetx = 29 + event.magnetic.x;
   heading = ((atan2(offsety, offsetx)) * 180) / Pi;
+  if (heading < 0) {
+    heading = 360 + heading;
+  }
 }
 
 float getAlt(float lat, float sd, float timeP) {
@@ -1565,14 +1742,16 @@ float getJD(int y, int m, int d) {
   }
 }
 
-void wifiStatus(){
+void wifiStatus() {
   int status = WiFi.status();
-  if(status ==WL_CONNECTED){
-    writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
-  }else{
-    writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
+  if (status == WL_CONNECTED) {
+    writeTxt(160, 17, "Server Online ", RA8875_WHITE, 2, 1);
+  } else {
+    writeTxt(160, 17, "Server Offline", RA8875_WHITE, 2, 1);
   }
 }
+
+
 
 bool wifiConnect() {
   int wifiStartTime = millis();
@@ -1585,7 +1764,8 @@ bool wifiConnect() {
     while (true) {
       if (millis() - wifiStartTime > 5000) {
         WiFi.end();
-        writeTxt(0, 250, "Connect fail", RA8875_WHITE, 2, 1);
+        writeTxt(0, 250, "Connect fail    ", RA8875_WHITE, 2, 1);
+
         return false;
       }
     }  //loop until a connection is established
@@ -1598,7 +1778,18 @@ bool wifiConnect() {
     IPAddress ip = WiFi.localIP();           //Retrieve the ip address of the system
     Serial.print("My IP address is: ");      //Print out the ip address to the serial monitor
     Serial.println(ip);                      //Print out the ip address to the serial monitor
-    writeTxt(0, 250, "Connect done", RA8875_WHITE, 2, 1);
+
+    conn.connect(server_addr, 3306, user, password);
+
+    writeTxt(0, 250, "Connect Done", RA8875_WHITE, 2, 1);
+    // bmeData();
+    // startPDTime=endTickTime;
+    // pushSensorData(enviornment_temp,enviornment_pressure,enviornment_humidity,enviornment_altitude);
+    // // Serial.println(endTickTime);
+    // // Serial.println(startPDTime);
+    // endTickTime=millis();
+    // startPDTime=endTickTime;
+
     return true;
   }
   return false;
@@ -1609,41 +1800,71 @@ void wifiCloseConnection() {
   WiFi.end();
 }
 
-void pushSensorData(float enviornment_temp, float enviornment_pressure, float enviornment_humidity, float enviornment_altitude) {
+void sendDataFSM() {
+  if (WIFISTAT && ((endTickTime - startPDTime) > 60000)) {
+    bmeData();
 
-  char temperature[8];
-  char pressure[8];
-  char altitude[8];
-  char humidity[8];
+    Serial.println(enviornment_temp);
+    Serial.println(enviornment_pressure);
+    Serial.println(enviornment_humidity);
+    Serial.println(enviornment_altitude);
 
-  dtostrf(enviornment_temp, 6, 2, temperature);
-  dtostrf(enviornment_pressure, 6, 2, pressure);
-  dtostrf(enviornment_altitude, 6, 2, altitude);
-  dtostrf(enviornment_humidity, 6, 2, humidity);
+    char bmeTemperature[8];
+    char bmePressure[8];
+    char bmeAltitude[8];
+    char bmeHumidity[8];
 
-  strcat(sqlQuery, temperature);
-  strcat(sqlQuery, ",");
-  strcat(sqlQuery, pressure);
-  strcat(sqlQuery, ",");
-  strcat(sqlQuery, altitude);
-  strcat(sqlQuery, ",");
-  strcat(sqlQuery, humidity);
-  strcat(sqlQuery, ")");
+    dtostrf(enviornment_temp, 6, 2, bmeTemperature);
+    dtostrf(enviornment_pressure, 6, 2, bmePressure);
+    dtostrf(enviornment_altitude, 6, 2, bmeAltitude);
+    dtostrf(enviornment_humidity, 6, 2, bmeHumidity);
 
-  Serial.println("Connecting to Database...");
+    Serial.println(bmeTemperature);
+    Serial.println(bmePressure);
 
-  if (conn.connect(server_addr, 3306, user, password)) {  //if the connection to the database at the specified location is true...
+    String newQuery = String(sqlQuery) + String(bmeTemperature) + "," + String(bmePressure) + "," + String(bmeAltitude) + "," + String(bmeHumidity) + ")";
+    Serial.println(newQuery);
 
-    delay(1000);                                      //delay for 1 second                         //print statement to check if it made it to this part of the loop
-    MySQL_Cursor *cur_mem = new MySQL_Cursor(&conn);  //Create a mySQL cursor that will be used to access the database
+    char charArray[150];
+    newQuery.toCharArray(charArray, 150);
+    Serial.println(charArray);
+
+    MySQL_Cursor *cur_mem = new MySQL_Cursor(&conn);
+    // Execute the query
     cur_mem->execute(deleteQuery);
-    cur_mem->execute(sqlQuery);  //point the cursor to execute the specified query
-    delete cur_mem;              //delete cursor for memory purposes
+    cur_mem->execute(charArray);
+    // Note: since there are no results, we do not need to read any data
+    // Deleting the cursor also frees up memory used
+    delete cur_mem;
 
+    selectControlData();
+
+    startPDTime = endTickTime;
   }
+}
 
-  else {
+void selectControlData() {
 
-    Serial.println("Database connection failed.");  //connection has failed if it reaches this else statement
-  }
+  row_values *row = NULL;
+
+  MySQL_Cursor *cur_mem1 = new MySQL_Cursor(&conn);
+
+  cur_mem1->execute(selectQuery);
+
+  column_names *columns = cur_mem1->get_columns();
+
+  do {
+    row = cur_mem1->get_next_row();
+    if (row != NULL) {
+      manual = atol(row->values[0]);
+      schedule = atol(row->values[1]);
+      automatic = atol(row->values[2]);
+    }
+  } while (row != NULL);
+  // Deleting the cursor also frees up memory used
+  delete cur_mem1;
+
+  Serial.println(manual);
+  Serial.println(schedule);
+  Serial.println(automatic);
 }

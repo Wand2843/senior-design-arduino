@@ -35,6 +35,8 @@ char user[] = "sql9596235";
 char password[] = "7LCYhZVIwK";
 
 char sqlQuery[] = "INSERT INTO sql9596235.tracked_sensors (temperature, pressure, altitude, humidity) VALUES (";
+char deleteQuery1[] = "DELETE FROM sql9596235.battery_sensors";
+char sqlQuery1[] = "INSERT INTO sql9596235.battery_sensors (battery_soc, battery_voltage, battery_charging_amps, battery_temperature, controller_temperature, load_voltage, load_amps, load_watts, solar_panel_voltage, solar_panel_amps, solar_panel_watts) VALUES (";
 char deleteQuery[] = "DELETE FROM sql9596235.tracked_sensors";
 char selectQuery[] = "SELECT * FROM sql9596235.control";
 
@@ -303,7 +305,7 @@ void setup() {
 
 
 void loop() {
-  // Serial.println("RA8875 start");
+  Serial.println("RA8875 start");
   // int sensorValue = analogRead(A7);
   // float voltage= sensorValue * (5.0 / 1023.0);
   // Serial.println(voltage);
@@ -452,9 +454,6 @@ void fsmTick() {
 
     case MAIN_MENU:
       displayTime();
-
-
-
       //CCData();
       //Serial.println(battery_voltage);
       if (displayWiFi) {
@@ -464,7 +463,29 @@ void fsmTick() {
 
       // if(WIFISTAT)writeTxt(160, 0, "Server Online ", RA8875_WHITE, 2, 1);
       // else writeTxt(160, 0, "Server Offline", RA8875_WHITE, 2, 1);
-      if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
+      if (automatic == 1 || schedule == 1) {
+        powerPress = 0;
+        prevState = state;
+        state = WIFI_MENU;
+        drawWiFiIcon(1);
+        drawRstIcon(0, 0);
+        drawStatsIcon(0);
+
+        MANUALMODE = false;
+        if (automatic == 1) {
+          stState = SENSOR_TRACKING;
+        } else if (schedule == 1) {
+          stState = FIXED_PATH;
+        }
+        drawRecordIcon(2);
+        drawAutoIcon(1);
+
+        pressedOut = false;
+        tft.fillRect(0, 101, 400, 380, RA8875_BLACK);
+        writeTxt(0, 101, "Server overwrite,", RA8875_WHITE, 2, 0);
+        writeTxt(0, 150, "press WiFi to", RA8875_WHITE, 2, 0);
+        writeTxt(0, 200, "cancel.", RA8875_WHITE, 2, 0);
+      } else if (calibrated.x > 627 && calibrated.x < (627 + 117) && calibrated.y > 76 && calibrated.y < (76 + 85) && pressedOut) {
         powerPress = powerPress + 1;
         // Serial.println(powerPress);
         if (powerPress == 8) {
@@ -537,9 +558,9 @@ void fsmTick() {
 
           pressedOut = false;
           tft.fillRect(0, 101, 400, 380, RA8875_BLACK);
-          writeTxt(0, 101, "Server overwrite,", RA8875_WHITE, 2, 0);
-          writeTxt(0, 150, "press WiFi to", RA8875_WHITE, 2, 0);
-          writeTxt(0, 200, "cancel.", RA8875_WHITE, 2, 0);
+          writeTxt(0, 101, "WiFi Mode", RA8875_WHITE, 2, 0);
+          writeTxt(0, 150, "press RE to", RA8875_WHITE, 2, 0);
+          writeTxt(0, 200, "connect", RA8875_WHITE, 2, 0);
           // setUpWifi(true);
           // delay(500);  //simulate setup
         } else if (calibrated.x > 460 && calibrated.x < (460 + 117) && calibrated.y > 340 && calibrated.y < (340 + 85) && pressedOut) {
@@ -651,7 +672,7 @@ void fsmTick() {
         drawSensorTable(statPageCount);
         // delay(100);
         pressedOut = false;
-      } else if (calibrated.x > 640 && calibrated.x < 800 && calibrated.y > 65 + 70 * 2 && calibrated.y < 65 + 70 * 4 && statPageCount < 2 && pressedOut) {
+      } else if (calibrated.x > 640 && calibrated.x < 800 && calibrated.y > 65 + 70 * 2 && calibrated.y < 65 + 70 * 4 && statPageCount < 1 && pressedOut) {
         statPageCount++;
         tft.fillRect(0, 70, 640, 410, RA8875_BLACK);
         for (int i = 1; i < 6; i++) { tft.fillRect(0, 65 + 70 * i, 640, 5, RA8875_WHITE); }
@@ -1036,37 +1057,98 @@ uint8_t solar_panel_watts;       // watts
 
     bmeData();
 
-    char myBatteryChargingAmps[8];
+    // char myBatteryChargingAmps[8];
     char myBatteryTemperature[8];
+    char myControllerTemperature[8];
+    char mySolarPanelVoltage[8];
+    char mySolarPanelAmps[8];
+    char mySolarPanelWatts[8];
+    // char myLoadVoltage[8];
+    // char myLoadAmps[8];
+    // char myLoadWatts[8];
 
-    dtostrf(battery_charging_amps, 6, 2, myBatteryChargingAmps);
+    // dtostrf(battery_charging_amps, 6, 2, myBatteryChargingAmps);
     dtostrf(battery_temperature, 6, 2, myBatteryTemperature);
+    dtostrf(controller_temperature, 6, 2, myControllerTemperature);
+    dtostrf(solar_panel_voltage, 6, 2, mySolarPanelVoltage);
+    dtostrf(solar_panel_amps, 6, 2, mySolarPanelAmps);
+    dtostrf(solar_panel_watts, 6, 2, mySolarPanelWatts);
+    // dtostrf(load_voltage, 6, 2, myLoadVoltage);
+    // dtostrf(load_amps, 6, 2, myLoadAmps);
+    // dtostrf(load_watts, 6, 2, myLoadWatts);
 
-    String battery_charging_amps_string = "Battery Amps:" + String(myBatteryChargingAmps) + " A";
+    // String battery_charging_amps_string = "Battery Amps:" + String(myBatteryChargingAmps) + " A";
     String battery_temperature_string = "Battery Temperature:" + String(myBatteryTemperature) + " Degrees C";
+    String controller_temperature_string = "Controller Temperature:" + String(myControllerTemperature) + " Degrees C";
+    String solar_panel_voltage_string = "Panel Voltage:" + String(mySolarPanelVoltage) + " V";
+    String solar_panel_amps_string = "Panel Amps:" + String(mySolarPanelAmps) + " A";
+    String solar_panel_watts_string = "Panel Watts: " + String(mySolarPanelWatts) + " W";
+    // String load_voltage_string = "Load Voltage:" + String(myLoadVoltage) + " V";
+    // String load_amps_string = "Load Amps:" + String(myLoadAmps) + " A";
+    // String load_watts_string = "Load Watts:" + String(myLoadWatts) + " W";
 
-    char charBatteryChargingAmpsArray[50];
+    // char charBatteryChargingAmpsArray[50];
     char charBatteryTemperatureArray[50];
+    char charControllerTemperatureArray[50];
+    char charSolarPanelVoltageArray[50];
+    char charSolarPanelAmpsArray[50];
+    char charSolarPanelWattsArray[50];
+    // char charLoadVoltageArray[50];
+    // char charLoadAmpsArray[50];
+    // char charLoadWattsArray[50];
 
-    battery_charging_amps_string.toCharArray(charBatteryChargingAmpsArray, 50);
+    // battery_charging_amps_string.toCharArray(charBatteryChargingAmpsArray, 50);
     battery_temperature_string.toCharArray(charBatteryTemperatureArray, 50);
+    controller_temperature_string.toCharArray(charControllerTemperatureArray, 50);
+    solar_panel_voltage_string.toCharArray(charSolarPanelVoltageArray, 50);
+    solar_panel_amps_string.toCharArray(charSolarPanelAmpsArray, 50);
+    solar_panel_watts_string.toCharArray(charSolarPanelWattsArray, 50);
+    // load_voltage_string.toCharArray(charLoadVoltageArray, 50);
+    // load_amps_string.toCharArray(charLoadAmpsArray, 50);
+    // load_watts_string.toCharArray(charLoadWattsArray, 50);
 
 
-    writeTxt(0, 80, charBatteryChargingAmpsArray, RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 1, charBatteryTemperatureArray, RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 2, "Charging Current: 0A", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 3, "How long did this take?", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 4, "One night", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 5, "When did I start? Sunday 12 AM", RA8875_WHITE, 1, 1);
+    // writeTxt(0, 80, charBatteryChargingAmpsArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80, charBatteryTemperatureArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 1, charControllerTemperatureArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 2, charSolarPanelVoltageArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 3, charSolarPanelAmpsArray, RA8875_WHITE, 1, 1);
+    writeTxt(0, 80 + 70 * 4, charSolarPanelWattsArray, RA8875_WHITE, 1, 1);
+    // writeTxt(0, 80 + 70 * 3, charLoadVoltageArray, RA8875_WHITE, 1, 1);
+    // writeTxt(0, 80 + 70 * 4, charLoadAmpsArray, RA8875_WHITE, 1, 1);
+    // writeTxt(0, 80 + 70 * 5, charLoadWattsArray, RA8875_WHITE, 1, 1);
 
     CCData();
 
   } else if (page == 2) {
 
-    writeTxt(0, 80, "Did I sleep? ", RA8875_WHITE, 1, 1);
-    writeTxt(0, 80 + 70 * 1, "No!", RA8875_WHITE, 1, 1);
+    /*
+uint8_t battery_temperature;     // celcius
+uint8_t controller_temperature;  // celcius
+float load_voltage;              // volts
+float load_amps;                 // amps
+uint8_t load_watts;              // watts
+float solar_panel_voltage;       // volts
+float solar_panel_amps;          // amps
+uint8_t solar_panel_watts;       // watts
+*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // CCData();
   }
 }
+
 
 void drawRecordMenu() {
   tft.fillScreen(RA8875_BLACK);
@@ -1136,8 +1218,14 @@ void displayTime() {
     time = time + "/";
     time = time + tmYearToCalendar(tm.Year);
     time = time + " ";
+    if (tm.Hour < 10) {
+      time = time + "0";
+    }
     time = time + tm.Hour;
     time = time + ":";
+    if (tm.Minute < 10) {
+      time = time + "0";
+    }
     time = time + tm.Minute;
     char output[50];
     time.toCharArray(output, 50);
@@ -1802,37 +1890,68 @@ void wifiCloseConnection() {
 
 void sendDataFSM() {
   if (WIFISTAT && ((endTickTime - startPDTime) > 60000)) {
-    bmeData();
 
-    Serial.println(enviornment_temp);
-    Serial.println(enviornment_pressure);
-    Serial.println(enviornment_humidity);
-    Serial.println(enviornment_altitude);
+    bmeData();
+    CCData();
 
     char bmeTemperature[8];
     char bmePressure[8];
     char bmeAltitude[8];
     char bmeHumidity[8];
 
+    char myBatteryPercentage[8];
+    char myBatteryVoltage[8];
+    char myBatteryChargingAmps[8];
+    char myBatteryTemperature[8];
+    char myControllerTemperature[8];
+    char myLoadVoltage[8];
+    char myLoadAmps[8];
+    char myLoadWatts[8];
+    char mySolarPanelVoltage[8];
+    char mySolarPanelAmps[8];
+    char mySolarPanelWatts[8];
+
+    float battery_percentage_float;
+
+    battery_percentage_float = battery_soc;
+
     dtostrf(enviornment_temp, 6, 2, bmeTemperature);
     dtostrf(enviornment_pressure, 6, 2, bmePressure);
     dtostrf(enviornment_altitude, 6, 2, bmeAltitude);
     dtostrf(enviornment_humidity, 6, 2, bmeHumidity);
 
-    Serial.println(bmeTemperature);
-    Serial.println(bmePressure);
+    dtostrf(battery_percentage_float, 6, 2, myBatteryPercentage);
+    dtostrf(battery_voltage, 6, 2, myBatteryVoltage);
+    dtostrf(battery_charging_amps, 6, 2, myBatteryChargingAmps);
+    dtostrf(battery_temperature, 6, 2, myBatteryTemperature);
+    dtostrf(controller_temperature, 6, 2, myControllerTemperature);
+    dtostrf(load_voltage, 6, 2, myLoadVoltage);
+    dtostrf(load_amps, 6, 2, myLoadAmps);
+    dtostrf(load_watts, 6, 2, myLoadWatts);
+    dtostrf(solar_panel_voltage, 6, 2, mySolarPanelVoltage);
+    dtostrf(solar_panel_amps, 6, 2, mySolarPanelAmps);
+    dtostrf(solar_panel_watts, 6, 2, mySolarPanelWatts);
+
 
     String newQuery = String(sqlQuery) + String(bmeTemperature) + "," + String(bmePressure) + "," + String(bmeAltitude) + "," + String(bmeHumidity) + ")";
+    String newQuery1 = String(sqlQuery1) + String(myBatteryPercentage) + "," + String(myBatteryVoltage) + "," + String(myBatteryChargingAmps) + "," + String(myBatteryTemperature) + "," + String(myControllerTemperature) + "," + String(myLoadVoltage) + "," + String(myLoadAmps) + "," + String(myLoadWatts) + "," + String(mySolarPanelVoltage) + "," + String(mySolarPanelAmps) + "," + String(mySolarPanelWatts) + ")";
     Serial.println(newQuery);
+    Serial.println(newQuery1);
 
     char charArray[150];
+    char charArray1[500];
     newQuery.toCharArray(charArray, 150);
+    newQuery1.toCharArray(charArray1, 500);
+
     Serial.println(charArray);
+    Serial.println(charArray1);
 
     MySQL_Cursor *cur_mem = new MySQL_Cursor(&conn);
     // Execute the query
     cur_mem->execute(deleteQuery);
     cur_mem->execute(charArray);
+    cur_mem->execute(deleteQuery1);
+    cur_mem->execute(charArray1);
     // Note: since there are no results, we do not need to read any data
     // Deleting the cursor also frees up memory used
     delete cur_mem;
@@ -1842,7 +1961,6 @@ void sendDataFSM() {
     startPDTime = endTickTime;
   }
 }
-
 void selectControlData() {
 
   row_values *row = NULL;

@@ -121,6 +121,7 @@ bool MANUALMODE;
 bool MOTORMOVE;
 bool MOTORMOVEDELAY;
 bool TRACKINGON;
+bool FIXEDPATHDONE;
 
 int motorCount;
 int laCount;
@@ -199,6 +200,7 @@ void setup() {
   MOTORMOVE = false;
   MOTORMOVEDELAY = false;
   TRACKINGON = false;
+  FIXEDPATHDONE = false;
   stState = TRACKING_OFF;
   state = SELF_CHECK;
   prevState = state;
@@ -341,6 +343,7 @@ void loop() {
 
   if ((endTickTime - startTrackingTime) > TRACKINGPERIOD) {
     TRACKINGON = true;
+    FIXEDPATHDONE = false;
     startTrackingTime = endTickTime;
   }
 
@@ -403,34 +406,51 @@ void trackingMove() {
       Serial.println(aziAngleAim);
       Serial.println(90 + angle);
       Serial.println(180 - heading);
-      if (180 - heading < aziAngleAim + baseAngleAzi - 2) {
+      if (180 - heading < aziAngleAim + baseAngleAzi - 2 && !FIXEDPATHDONE) {
         panelMove(directions = LEFT_M);
         panelMoveDelay(directions = LEFT_M);
-      } else if (180 - heading > aziAngleAim + baseAngleAzi + 2) {
+      } else if (180 - heading > aziAngleAim + baseAngleAzi + 2 && !FIXEDPATHDONE) {
         panelMove(directions = RIGHT_M);
         panelMoveDelay(directions = RIGHT_M);
-      } else if (angle + 90 < altAngleAim + baseAngleAlt - 2) {
+      } else if (angle + 90 < altAngleAim + baseAngleAlt - 2 && !FIXEDPATHDONE) {
         panelMove(directions = UP_LA);
         panelMoveDelay(directions = UP_LA);
-      } else if (angle + 90 > altAngleAim + baseAngleAlt + 2) {
+      } else if (angle + 90 > altAngleAim + baseAngleAlt + 2 && !FIXEDPATHDONE) {
         panelMove(directions = DOWN_LA);
         panelMoveDelay(directions = DOWN_LA);
       } else if (stState == SENSOR_TRACKING /*and ref reads are not 3.3*/) {
-        // else if(readLR is greater than 1.24+A){
-        //     panelMove(directions = RIGHT_M);
-        //   panelMoveDelay(directions = RIGHT_M);
-        // }else if(readLR is less than 1.24-A){
-        //   panelMove(directions = LEFT_M);
-        //   panelMoveDelay(directions = LEFT_M);
-        // }else if(readUD is greater than 1.24+A){
-        //   panelMove(directions = UP_LA);
-        //   panelMoveDelay(directions = UP_LA);
-        // }else if(readUD is less than 1.24-A){
-        //   panelMove(directions = DOWN_LA);
-        //   panelMoveDelay(directions = DOWN_LA);
-        // }
+        FIXEDPATHDONE = true;
+        float r1Raw = analogRead(16);
+        float r2Raw = analogRead(14);
+        float d1Raw = analogRead(15);
+        float d2Raw = analogRead(17);
+        float r1V = r1Raw / 1023 * 3.3;
+        float r2V = r2Raw / 1023 * 3.3;
+        float d1V = d1Raw / 1023 * 3.3;
+        float d2V = d2Raw / 1023 * 3.3;
+        if (r1V < 3 && r2V < 3.1) {
+          if (d1V > 1.6) {
+            panelMove(directions = RIGHT_M);
+            panelMoveDelay(directions = RIGHT_M);
+          } else if (d1V < 0.8) {
+            panelMove(directions = LEFT_M);
+            panelMoveDelay(directions = LEFT_M);
+          } else if (d2V > 1.6) {
+            panelMove(directions = UP_LA);
+            panelMoveDelay(directions = UP_LA);
+          } else if (d2V < 0.8) {
+            panelMove(directions = DOWN_LA);
+            panelMoveDelay(directions = DOWN_LA);
+          } else {
+            TRACKINGON = false;
+          }
+        } else {
+          TRACKINGON = false;
+        }
+
       } else {
         TRACKINGON = false;
+        FIXEDPATHDONE = true;
       }
     }
   }
@@ -1072,7 +1092,7 @@ uint8_t solar_panel_watts;       // watts
     dtostrf(controller_temperature, 6, 2, myControllerTemperature);
     dtostrf(solar_panel_voltage, 6, 2, mySolarPanelVoltage);
     dtostrf(solar_panel_amps, 6, 2, mySolarPanelAmps);
-    dtostrf(solar_panel_watts, 6, 2, mySolarPanelWatts);
+    dtostrf(solar_panel_voltage * solar_panel_amps, 6, 2, mySolarPanelWatts);
     // dtostrf(load_voltage, 6, 2, myLoadVoltage);
     // dtostrf(load_amps, 6, 2, myLoadAmps);
     // dtostrf(load_watts, 6, 2, myLoadWatts);
@@ -1633,10 +1653,15 @@ void accelSetup() {
 
 
 void accelPoll() {
-  sensors_event_t event;
-  accel.getEvent(&event);
-  float Pi = 3.14159;
-  angle = (atan2(event.acceleration.y, event.acceleration.z) * 180) / Pi;
+  float aSum = 0;
+  for (int i = 0; i < 20; i++) {
+    sensors_event_t event;
+    accel.getEvent(&event);
+    float Pi = 3.14159;
+    angle = (atan2(event.acceleration.y, event.acceleration.z) * 180) / Pi;
+    aSum+=angle;
+  }
+  angle=aSum/20;
 }
 
 void magSetup() {
@@ -1704,16 +1729,21 @@ void magSetup() {
 }
 
 void magPoll() {
-  lis3mdl.read();  // get X Y and Z data at once
-  sensors_event_t event;
-  lis3mdl.getEvent(&event);
-  float Pi = 3.14159;
-  float offsety = -22 + event.magnetic.y;
-  float offsetx = 29 + event.magnetic.x;
-  heading = ((atan2(offsety, offsetx)) * 180) / Pi;
-  if (heading < 0) {
-    heading = 360 + heading;
+  float hSum = 0;
+  for (int i = 0; i < 20; i++) {
+    lis3mdl.read();  // get X Y and Z data at once
+    sensors_event_t event;
+    lis3mdl.getEvent(&event);
+    float Pi = 3.14159;
+    float offsety = -22 + event.magnetic.y;
+    float offsetx = 29 + event.magnetic.x;
+    heading = ((atan2(offsety, offsetx)) * 180) / Pi;
+    if (heading < 0) {
+      heading = 360 + heading;
+    }
+    hSum += heading;
   }
+  heading = hSum / 20;
 }
 
 float getAlt(float lat, float sd, float timeP) {
